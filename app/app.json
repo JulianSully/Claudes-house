@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "AccessMap",
+    "slug": "accessmap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "accessmap",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0B5FFF"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.accessmap.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "AccessMap uses your location to show accessible venues near you."
+      },
+      "config": {
+        "googleMapsApiKey": "REPLACE_WITH_IOS_GOOGLE_MAPS_KEY"
+      }
+    },
+    "android": {
+      "package": "com.accessmap.app",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      "config": {
+        "googleMaps": {
+          "apiKey": "REPLACE_WITH_ANDROID_GOOGLE_MAPS_KEY"
+        }
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "AccessMap uses your location to show accessible venues near you."
+        }
+      ]
+    ]
+  }
+}
