@@ -1,0 +1,14 @@
+project_id = "scam-check"
+
+[functions.check-message]
+verify_jwt = true
+
+[functions.create-checkout-session]
+verify_jwt = true
+
+[functions.create-portal-session]
+verify_jwt = true
+
+# Stripe signs its requests with a webhook secret, not a Supabase JWT.
+[functions.stripe-webhook]
+verify_jwt = false
