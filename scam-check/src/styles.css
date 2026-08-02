@@ -518,6 +518,8 @@ a {
    ========================================================================== */
 
 .verdict {
+  /* clear the sticky header when we scroll the result into view */
+  scroll-margin-top: 78px;
   --v-ink: var(--caution-ink);
   --v-strong: var(--caution-strong);
   --v-tint: var(--caution-tint);
@@ -782,6 +784,7 @@ a {
    ========================================================================== */
 
 .upsell {
+  scroll-margin-top: 78px;
   margin-top: 22px;
   padding: 22px 20px;
   border-radius: var(--radius-lg);

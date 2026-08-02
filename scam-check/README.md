@@ -13,6 +13,29 @@ Two modes:
 
 ---
 
+## Try it without setting anything up
+
+`demo/index.html` is a single self-contained file — no build, no keys, no
+network. Open it in a browser and the whole interface works.
+
+What's real in the demo and what isn't:
+
+- **Website checks are faithful.** The domain analysis is a direct port of
+  `supabase/functions/_shared/url-analysis.ts`, so the findings are exactly what
+  production works from.
+- **Message checks are not the model.** They run local pattern-matching instead
+  of Claude. Treat those verdicts as a preview of the interface, not of the real
+  quality — the whole point of the production version is that Claude reads the
+  message rather than matching keywords against it.
+- **Payments are switched off.** The free limit and the upgrade panel behave
+  normally; the upgrade button just lifts the limit so you can keep trying it.
+  Usage is counted in `localStorage`.
+
+Sample scams and legitimate messages are built in, so there's something to click
+straight away.
+
+---
+
 ## Stack
 
 - **Frontend** — React + Vite, deployable as a static site
