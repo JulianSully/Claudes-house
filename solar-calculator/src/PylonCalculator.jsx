@@ -70,6 +70,11 @@ export default function PylonCalculator({ onOpenClassic }) {
   const selfSufficiency =
     results.totalKwh > 0 ? (1 - gridDrawn / results.totalKwh) * 100 : 0;
 
+  // `newBill` is floored at zero, so once savings exceed the bill the shortfall
+  // has to be shown separately or the read-out contradicts a >100% saving.
+  const billNow = Number.isFinite(billAmount) ? billAmount : 0;
+  const credit = Math.max(0, results.totalSavings - billNow);
+
   const fmt$ = (n) => `$${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
   const fmt$0 = (n) => `$${Math.round(Number.isFinite(n) ? n : 0).toLocaleString()}`;
   const fmtKwh = (n) => `${(Number.isFinite(n) ? n : 0).toFixed(0)} kWh`;
@@ -304,7 +309,14 @@ export default function PylonCalculator({ onOpenClassic }) {
                       </div>
                       <div className="h-2.5 w-full rounded-full bg-slate-300" />
                       <div className="mb-1 mt-3 flex justify-between text-[11.5px] text-slate-500">
-                        <span>New estimated bill</span>
+                        <span>
+                          New estimated bill
+                          {credit > 0.005 && (
+                            <span className="ml-1.5 text-emerald-700">
+                              + {fmt$(credit)} in credit
+                            </span>
+                          )}
+                        </span>
                         <span className="font-mono font-semibold tabular-nums text-slate-900">
                           {fmt$(results.newBill)}
                         </span>
@@ -549,7 +561,7 @@ export default function PylonCalculator({ onOpenClassic }) {
                   <BatteryCharging size={15} className="mt-0.5 shrink-0 text-brand-600" />
                   <div>
                     <span className="font-semibold">Night usage is untouched.</span>{" "}
-                    {fmtKwh(results.dailyExported)}/day is being exported at{" "}
+                    {results.dailyExported.toFixed(1)} kWh/day is being exported at{" "}
                     {feedInTariff || 0}c instead of covering {results.dailyNightKwh.toFixed(1)}{" "}
                     kWh/day of night usage at {usageCharge || 0}c. Add a battery above to
                     model it.

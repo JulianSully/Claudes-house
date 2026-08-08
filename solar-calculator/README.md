@@ -72,6 +72,47 @@ usefully, that a month and a quarter describing the *same daily consumption*
 produce identical daily figures, which is what breaks the moment the battery cap
 is applied to a period total instead of a day.
 
+## Audit findings
+
+The calculation was swept across 240 input combinations (2 periods × 6 bills ×
+5 battery sizes × 4 system sizes) checking energy and value conservation.
+
+**Clean:**
+
+- Production always balances: `selfConsumed + batteryCharge + exported ==
+  production`, exactly, in every case.
+- Usage savings never exceed the usage portion of the bill — the model can't
+  overstate a saving. `selfConsumed ≤ dayKwh` and `nightCovered ≤ nightKwh`
+  hold by construction.
+
+**Known gap — stored energy that is never used or credited.**
+
+Rule 3 fills the battery to capacity before anything is exported, and the
+battery only ever discharges into night usage. When the battery is larger than
+the night load, the difference is neither consumed nor exported, so it earns no
+feed-in credit and simply leaves the accounting:
+
+```
+$450/quarter, 6.6 kW, 16 kWh battery
+production 3003 kWh = self 656 + charged 1456 + exported 891
+of the 1456 kWh charged, only 437 kWh is used at night
+→ 1019 kWh earns nothing.  At 6c that is $61 of unclaimed feed-in.
+```
+
+Worst case in the sweep (27 kWh battery, low bill): 2457 kWh, about $147 per
+quarter.
+
+This is a direct consequence of the locked priority order, not a coding slip.
+Correcting it means charging `min(excess, capacity, nightUsage)` and exporting
+the remainder — which changes the verified case (export 1.50 → 7.17 kWh/day,
+saving $250.70 → $260.90) and so is deliberately **not** applied. The estimate
+errs conservative: it understates the saving, never overstates it.
+
+**Fixed (display only, locked block untouched):** `newBill` is floored at zero
+while `savingsPercent` is not, so a customer whose savings exceed their bill saw
+"$0.00" next to "103% off". The studio view now shows the excess as an explicit
+credit alongside the new bill.
+
 > **Note on the bill figure.** The brief quoted this case as a **$450/month**
 > bill. At 32c/kWh with a $1.10/day supply charge, $450 over 30 days
 > back-calculates to **1303.125 kWh**, not 775 — 775 kWh is what a **$281**
