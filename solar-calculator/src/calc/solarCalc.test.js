@@ -1,13 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { computeResults, PRODUCTION_FACTOR, DAYS_IN_PERIOD } from "./solarCalc";
+import {
+  computeResults,
+  computeEconomics,
+  productionFactorFor,
+  LEGACY_PRODUCTION_FACTOR,
+  DEFAULT_BATTERY_EFFICIENCY,
+  DEFAULT_REGION,
+  REGIONS,
+  DAYS_IN_PERIOD,
+} from "./solarCalc";
 
+// The regression suite pins the allocation at a lossless battery and the
+// original 5 kWh/kW/day factor, so it tests the maths rather than whatever
+// the region table or the efficiency default happen to say this week.
 const TARIFF = {
   supplyCharge: 1.1, // $/day
   usageCharge: 32, // c/kWh
   feedInTariff: 6, // c/kWh
   systemSizeKw: 6.6,
-  productionFactor: PRODUCTION_FACTOR,
+  productionFactor: LEGACY_PRODUCTION_FACTOR,
   batteryCapacity: 16,
+  batteryEfficiency: 100,
   dayPercent: 60,
   nightPercent: 40,
 };
@@ -200,9 +213,122 @@ describe("rule 3 — allocation priority", () => {
   });
 });
 
-describe("rule 4 — production factor is fixed at 5 kWh/kW/day", () => {
-  it("is 5", () => {
-    expect(PRODUCTION_FACTOR).toBe(5);
+describe("rule 4 — production factor comes from region + season", () => {
+  it("keeps the legacy constant available for regression pinning", () => {
+    expect(LEGACY_PRODUCTION_FACTOR).toBe(5);
+  });
+
+  it("resolves every region and season to a sane yield", () => {
+    for (const [key, region] of Object.entries(REGIONS)) {
+      for (const season of ["annual", "summer", "winter"]) {
+        const f = productionFactorFor(key, season);
+        expect(f, `${key}/${season}`).toBeGreaterThan(1);
+        expect(f, `${key}/${season}`).toBeLessThan(7);
+      }
+      // Winter never beats summer outside the tropics; the NT is the one
+      // place the dry season outperforms the wet.
+      if (key !== "nt") {
+        expect(region.winter, key).toBeLessThan(region.summer);
+      }
+      // The annual average has to sit between the two seasonal extremes,
+      // whichever way round they fall.
+      expect(region.annual, key).toBeGreaterThanOrEqual(
+        Math.min(region.summer, region.winter)
+      );
+      expect(region.annual, key).toBeLessThanOrEqual(
+        Math.max(region.summer, region.winter)
+      );
+    }
+  });
+
+  it("falls back to the default region for an unknown one", () => {
+    expect(productionFactorFor("atlantis", "annual")).toBe(
+      REGIONS[DEFAULT_REGION].annual
+    );
+  });
+
+  it("scales production linearly with the factor", () => {
+    const at = (productionFactor) =>
+      run({ billAmount: 281, days: 30, productionFactor }).systemProduction;
+    expect(at(4.1)).toBeCloseTo(at(8.2) / 2, 6);
+  });
+});
+
+describe("rule 5 — battery round-trip losses", () => {
+  it("is lossless at 100% and matches the pre-efficiency behaviour", () => {
+    const r = run({ billAmount: 281, days: 30, batteryEfficiency: 100 });
+    expect(r.dailyBatteryCharge).toBeCloseTo(310 / 30, 9);
+    expect(r.dailyNightCovered).toBeCloseTo(310 / 30, 9);
+    expect(r.batteryLoss).toBeCloseTo(0, 9);
+  });
+
+  it("stores more than it delivers, and the gap is the loss", () => {
+    const r = run({ billAmount: 281, days: 30, batteryEfficiency: 90 });
+    const night = 310 / 30;
+    // Delivering 10.333 kWh after dark means storing 10.333 / 0.9.
+    expect(r.dailyBatteryCharge).toBeCloseTo(night / 0.9, 9);
+    expect(r.dailyNightCovered).toBeCloseTo(night, 9);
+    expect(r.dailyBatteryLoss).toBeCloseTo(night / 0.9 - night, 9);
+    expect(r.dailyRemainingNight).toBeCloseTo(0, 9);
+  });
+
+  it("still balances: production = self + charged + exported", () => {
+    for (const batteryEfficiency of [0, 50, 85, 90, 100]) {
+      for (const batteryCapacity of [0, 5, 16, 40]) {
+        const r = run({ billAmount: 281, days: 30, batteryCapacity, batteryEfficiency });
+        expect(
+          r.dailySelfConsumed + r.dailyBatteryCharge + r.dailyExported,
+          `${batteryEfficiency}%/${batteryCapacity}kWh`
+        ).toBeCloseTo(r.dailyProduction, 9);
+        expect(r.dailyNightCovered).toBeLessThanOrEqual(r.dailyBatteryCharge + 1e-9);
+      }
+    }
+  });
+
+  it("a 0% battery is worth nothing and stores nothing", () => {
+    const r = run({ billAmount: 281, days: 30, batteryEfficiency: 0 });
+    expect(r.dailyBatteryCharge).toBe(0);
+    expect(r.savingsBattery).toBe(0);
+    expect(r.dailyExported).toBeCloseTo(17.5, 9);
+  });
+
+  it("losses reduce the saving relative to a lossless battery", () => {
+    const lossless = run({ billAmount: 281, days: 30, batteryEfficiency: 100 });
+    const real = run({ billAmount: 281, days: 30, batteryEfficiency: DEFAULT_BATTERY_EFFICIENCY });
+    // Same night usage covered, but more solar consumed doing it, so less
+    // is left to export.
+    expect(real.nightCoveredByBattery).toBeCloseTo(lossless.nightCoveredByBattery, 6);
+    expect(real.exported).toBeLessThan(lossless.exported);
+    expect(real.totalSavings).toBeLessThan(lossless.totalSavings);
+  });
+});
+
+describe("economics", () => {
+  const energy = run({ billAmount: 281, days: 30 });
+
+  it("annualises the saving from the period length", () => {
+    const e = computeEconomics({ totalSavings: energy.totalSavings, days: 30, systemCost: 0 });
+    expect(e.annualSavings).toBeCloseTo((energy.totalSavings / 30) * 365, 6);
+  });
+
+  it("gives the same annual figure whichever period it is quoted over", () => {
+    const monthly = computeEconomics({ totalSavings: 100, days: 30, systemCost: 9000 });
+    const quarterly = computeEconomics({ totalSavings: (100 / 30) * 91, days: 91, systemCost: 9000 });
+    expect(quarterly.annualSavings).toBeCloseTo(monthly.annualSavings, 6);
+    expect(quarterly.paybackYears).toBeCloseTo(monthly.paybackYears, 6);
+  });
+
+  it("computes payback and ten-year net", () => {
+    const e = computeEconomics({ totalSavings: 250, days: 30, systemCost: 12000 });
+    const annual = (250 / 30) * 365;
+    expect(e.paybackYears).toBeCloseTo(12000 / annual, 6);
+    expect(e.tenYearNet).toBeCloseTo(annual * 10 - 12000, 6);
+  });
+
+  it("has no payback without a cost or without a saving", () => {
+    expect(computeEconomics({ totalSavings: 250, days: 30, systemCost: 0 }).paybackYears).toBeNull();
+    expect(computeEconomics({ totalSavings: 0, days: 30, systemCost: 9000 }).paybackYears).toBeNull();
+    expect(computeEconomics({ totalSavings: 250, days: 0, systemCost: 9000 }).paybackYears).toBeNull();
   });
 });
 

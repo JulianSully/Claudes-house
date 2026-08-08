@@ -51,6 +51,30 @@ export function InputRow({ label, unit, value, onChange, step = "0.1", min = "0"
   );
 }
 
+export function SelectRow({ label, value, onChange, options, hint }) {
+  const id = useId();
+  return (
+    <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+      <label htmlFor={id} className="text-[13px] text-slate-600 leading-tight">
+        {label}
+        {hint && <span className="block text-[11px] text-slate-400">{hint}</span>}
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-9 w-[132px] rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export function Segmented({ options, value, onChange, label }) {
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-3">

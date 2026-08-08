@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { Sun, Moon, Zap, TrendingDown, Info, BatteryCharging } from "lucide-react";
 
-import { useSolarResults, NUMBER } from "./calc/solarCalc";
+import {
+  useSolarResults,
+  productionFactorFor,
+  NUMBER,
+  DEFAULT_REGION,
+  DEFAULT_SEASON,
+  DEFAULT_BATTERY_EFFICIENCY,
+} from "./calc/solarCalc";
 
 function Field({ label, suffix, value, onChange, step = "0.1", min = "0" }) {
   return (
@@ -40,8 +47,13 @@ export default function SolarSavingsCalculator() {
   const [billPeriod, setBillPeriod] = useState("quarterly"); // monthly | quarterly
   const [dayPercent, setDayPercent] = useState(60);
   const [systemSizeKw, setSystemSizeKw] = useState(6.6);
-  const [productionFactor, setProductionFactor] = useState(5.0); // kWh/kW/day
+  // Defaults come from the shared module so this view and the studio view
+  // quote the same number for the same system.
+  const [productionFactor] = useState(
+    productionFactorFor(DEFAULT_REGION, DEFAULT_SEASON)
+  ); // kWh/kW/day — region and season are chosen in the studio view
   const [batteryCapacity, setBatteryCapacity] = useState(0); // kWh, 0 = no battery
+  const [batteryEfficiency] = useState(DEFAULT_BATTERY_EFFICIENCY);
 
   const days = billPeriod === "monthly" ? 30 : 91;
   const nightPercent = 100 - dayPercent;
@@ -49,7 +61,7 @@ export default function SolarSavingsCalculator() {
   const results = useSolarResults({
     supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
     dayPercent, systemSizeKw, productionFactor, batteryCapacity,
-    days, nightPercent,
+    batteryEfficiency, days, nightPercent,
   });
 
   const fmt$ = (n) => `$${NUMBER(n).toFixed(2)}`;
@@ -144,8 +156,9 @@ export default function SolarSavingsCalculator() {
                 <Field label="System size" suffix="kW" value={systemSizeKw} onChange={setSystemSizeKw} step="0.1" />
                 <p className="flex items-start gap-1.5 text-[11px] text-slate-500 leading-relaxed">
                   <Info size={13} className="mt-0.5 shrink-0" />
-                  Estimated at system size × 5 kWh/day — a 6.6kW system produces roughly 33 kWh/day
-                  on average.
+                  Estimated at system size × {productionFactor} kWh/kW/day — a 6.6kW system
+                  produces roughly {(6.6 * productionFactor).toFixed(0)} kWh/day on average.
+                  Switch to the studio view to set location and season.
                 </p>
               </div>
             </section>

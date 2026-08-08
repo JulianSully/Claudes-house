@@ -15,11 +15,31 @@ import {
   ChevronRight,
   MapPin,
   TrendingDown,
+  TrendingUp,
   Gauge,
+  Wallet,
 } from "lucide-react";
 
-import { useSolarResults, DAYS_IN_PERIOD, PRODUCTION_FACTOR } from "./calc/solarCalc";
-import { Panel, InputRow, Segmented, Card, StatTile, AllocationBar } from "./components/ui";
+import {
+  useSolarResults,
+  computeEconomics,
+  productionFactorFor,
+  DAYS_IN_PERIOD,
+  REGIONS,
+  SEASONS,
+  DEFAULT_REGION,
+  DEFAULT_SEASON,
+  DEFAULT_BATTERY_EFFICIENCY,
+} from "./calc/solarCalc";
+import {
+  Panel,
+  InputRow,
+  SelectRow,
+  Segmented,
+  Card,
+  StatTile,
+  AllocationBar,
+} from "./components/ui";
 
 /* Validated categorical palette (light surface) — amber = solar used directly,
  * emerald = stored and used at night, blue = exported. The neutral fill is the
@@ -50,8 +70,28 @@ export default function PylonCalculator({ onOpenClassic }) {
   const [billPeriod, setBillPeriod] = useState("quarterly"); // monthly | quarterly
   const [dayPercent, setDayPercent] = useState(60);
   const [systemSizeKw, setSystemSizeKw] = useState(6.6);
-  const [productionFactor] = useState(PRODUCTION_FACTOR); // fixed, not a UI input
   const [batteryCapacity, setBatteryCapacity] = useState(0); // kWh, 0 = no battery
+  const [batteryEfficiency, setBatteryEfficiency] = useState(DEFAULT_BATTERY_EFFICIENCY);
+  const [systemCost, setSystemCost] = useState(0); // $ net of rebates
+  const [region, setRegion] = useState(DEFAULT_REGION);
+  const [season, setSeason] = useState(DEFAULT_SEASON);
+
+  // Region + season drive the yield, but it stays editable: the moment it is
+  // typed over, the region select stops steering it.
+  const [factorOverride, setFactorOverride] = useState(null);
+  const suggestedFactor = productionFactorFor(region, season);
+  const productionFactor = factorOverride ?? suggestedFactor;
+  const factorIsOverridden =
+    factorOverride !== null && Math.abs(factorOverride - suggestedFactor) > 1e-9;
+
+  const setRegionAndClear = (v) => {
+    setRegion(v);
+    setFactorOverride(null);
+  };
+  const setSeasonAndClear = (v) => {
+    setSeason(v);
+    setFactorOverride(null);
+  };
 
   const days = DAYS_IN_PERIOD[billPeriod];
   const nightPercent = 100 - dayPercent;
@@ -61,7 +101,13 @@ export default function PylonCalculator({ onOpenClassic }) {
   const results = useSolarResults({
     supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
     dayPercent, systemSizeKw, productionFactor, batteryCapacity,
-    days, nightPercent,
+    batteryEfficiency, days, nightPercent,
+  });
+
+  const economics = computeEconomics({
+    totalSavings: results.totalSavings,
+    days,
+    systemCost,
   });
 
   /* Display-only ratios of the locked outputs. These never feed back into the
@@ -195,10 +241,53 @@ export default function PylonCalculator({ onOpenClassic }) {
                 onChange={setBatteryCapacity}
                 step="0.5"
               />
+              <InputRow
+                label="Installed price"
+                hint="net of rebates"
+                unit="$"
+                value={systemCost}
+                onChange={setSystemCost}
+                step="100"
+              />
+            </Panel>
+
+            <Panel title="Yield assumption" icon={Gauge}>
+              <SelectRow
+                label="Location"
+                value={region}
+                onChange={setRegionAndClear}
+                options={Object.entries(REGIONS).map(([value, r]) => ({
+                  value,
+                  label: r.label,
+                }))}
+              />
+              <SelectRow
+                label="Season"
+                value={season}
+                onChange={setSeasonAndClear}
+                options={SEASONS}
+              />
+              <InputRow
+                label="Production"
+                hint={
+                  factorIsOverridden
+                    ? `overridden — ${REGIONS[region].label} ${season} is ${suggestedFactor}`
+                    : `${REGIONS[region].label}, ${season}`
+                }
+                unit="kWh/kW/day"
+                value={productionFactor}
+                onChange={(v) => setFactorOverride(v === "" ? null : v)}
+                step="0.1"
+              />
               <p className="flex items-start gap-1.5 pt-1 text-[11.5px] leading-relaxed text-slate-500">
                 <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
-                Production is estimated at {PRODUCTION_FACTOR} kWh per kW per day — a
-                6.6 kW system averages about 33 kWh/day.
+                <span>
+                  Indicative planning figures — published sources vary by a few tenths, and
+                  real yield moves with tilt, orientation and shading. Quote on{" "}
+                  <span className="font-medium text-slate-600">winter</span> if the customer
+                  will judge the estimate by their first bill. Calibrate against your own
+                  monitoring data once you have it.
+                </span>
               </p>
             </Panel>
 
@@ -280,7 +369,32 @@ export default function PylonCalculator({ onOpenClassic }) {
                 <span>{fmtKwh(results.dayKwh)} day</span>
                 <span>{fmtKwh(results.nightKwh)} night</span>
               </div>
+              <p className="flex items-start gap-1.5 pt-2 text-[11.5px] leading-relaxed text-slate-500">
+                <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
+                "Day" is treated as available to the array. In reality some of it falls
+                early and late when production is low, so self-consumption here is the
+                optimistic end.
+              </p>
             </Panel>
+
+            {batteryCapacity > 0 && (
+              <Panel title="Battery" icon={BatteryCharging}>
+                <InputRow
+                  label="Round-trip efficiency"
+                  hint="typically 88–92%"
+                  unit="%"
+                  value={batteryEfficiency}
+                  onChange={setBatteryEfficiency}
+                  step="1"
+                />
+                <p className="flex items-start gap-1.5 pt-1 text-[11.5px] leading-relaxed text-slate-500">
+                  <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
+                  Delivering {results.dailyNightCovered.toFixed(1)} kWh after dark takes{" "}
+                  {results.dailyBatteryCharge.toFixed(1)} kWh in — {fmtKwh(results.batteryLoss)}{" "}
+                  lost over the {periodWord}.
+                </p>
+              </Panel>
+            )}
           </aside>
 
           {/* ---------- workspace ---------- */}
@@ -517,6 +631,17 @@ export default function PylonCalculator({ onOpenClassic }) {
                       rate={`${feedInTariff || 0}c`}
                       value={fmt$(results.savingsExport)}
                     />
+                    {results.batteryLoss > 0.005 && (
+                      <BreakdownRow
+                        color={C.grid}
+                        muted
+                        label="Battery round-trip loss"
+                        note={`${batteryEfficiency || 0}% efficiency`}
+                        energy={fmtKwh(results.batteryLoss)}
+                        rate="—"
+                        value="—"
+                      />
+                    )}
                     {results.remainingDayUsage > 0 && (
                       <BreakdownRow
                         color={C.grid}
@@ -556,6 +681,59 @@ export default function PylonCalculator({ onOpenClassic }) {
                 </div>
               </Card>
 
+              <Card
+                title="Return"
+                icon={Wallet}
+                subtitle={
+                  systemCost > 0
+                    ? "Simple payback — no tariff inflation, no panel degradation, no discount rate."
+                    : "Enter the installed price above to see payback."
+                }
+              >
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <div className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                      Saving per year
+                    </div>
+                    <div className="mt-1.5 font-mono text-[22px] font-semibold tabular-nums text-slate-900">
+                      {fmt$0(economics.annualSavings)}
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] text-slate-500">
+                      {fmt$(results.totalSavings)} per {periodWord}, annualised
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                      Payback
+                    </div>
+                    <div className="mt-1.5 font-mono text-[22px] font-semibold tabular-nums text-brand-600">
+                      {economics.paybackYears === null
+                        ? "—"
+                        : `${economics.paybackYears.toFixed(1)} yrs`}
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] text-slate-500">
+                      {systemCost > 0 ? `on ${fmt$0(systemCost)} installed` : "no price entered"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+                      10-year position
+                    </div>
+                    <div
+                      className={`mt-1.5 font-mono text-[22px] font-semibold tabular-nums ${
+                        economics.tenYearNet >= 0 ? "text-emerald-700" : "text-slate-900"
+                      }`}
+                    >
+                      {economics.tenYearNet >= 0 ? "+" : "−"}
+                      {fmt$0(Math.abs(economics.tenYearNet))}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1 text-[11.5px] text-slate-500">
+                      <TrendingUp size={11} /> savings less the install price
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
               {!hasBattery && (
                 <div className="flex items-start gap-2.5 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-[12.5px] leading-relaxed text-brand-900">
                   <BatteryCharging size={15} className="mt-0.5 shrink-0 text-brand-600" />
@@ -570,10 +748,12 @@ export default function PylonCalculator({ onOpenClassic }) {
               )}
 
               <p className="px-1 pb-2 text-[11.5px] leading-relaxed text-slate-400">
-                Simplified daily-average estimate for quick quoting. It doesn't account for
-                day-to-day variability, battery round-trip efficiency losses, inverter
-                clipping, or seasonal shifts in production and usage. For a firm proposal,
-                load the customer's actual interval data.
+                Simplified daily-average estimate for quick quoting. Yield is set from
+                location and season and the battery's round-trip loss is included; still
+                not modelled are day-to-day weather variability, inverter clipping, panel
+                degradation, tariff changes over the payback period, and the shape of the
+                load within the day. For a firm proposal, load the customer's actual
+                interval data.
               </p>
             </div>
           </main>

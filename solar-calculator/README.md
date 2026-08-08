@@ -25,6 +25,7 @@ npm run build
 ```
 src/
   calc/solarCalc.js        LOCKED calculation — computeResults() + useSolarResults()
+                           plus REGIONS (yield table) and computeEconomics()
   calc/solarCalc.test.js   verified case + one guard per locked rule
   PylonCalculator.jsx      studio UI (default view)
   SolarSavingsCalculator.jsx  original dark estimator, verbatim
@@ -54,19 +55,44 @@ change the maths in `computeResults` — it encodes four rules:
    consume. A 16 kWh battery serving a 10 kWh night load takes on 10 kWh and
    the rest of the spare solar is exported. So the daily charge is capped three
    ways: `min(spare solar, capacity, night load)`.
-4. **Production factor is fixed at 5 kWh/kW/day** and is intentionally not
-   exposed as an input in the UI.
+4. **Production factor comes from location and season.** It was originally a
+   hidden constant of 5 kWh/kW/day. That is optimistic as an annual average for
+   most of Australia, and a hidden constant of that size was the single biggest
+   unchecked lever in the whole estimate, so it is now driven by a region and
+   season selector and stays editable. See `REGIONS` in `solarCalc.js`.
+5. **The battery loses energy on the round trip.** Delivering L kWh after dark
+   means storing `L / efficiency`, so the charge is sized on the delivered
+   figure and the difference is booked as a real loss. Default 90%.
 
 Anything the UI adds on top must be a *presentation* of these outputs. The
 studio view's "self-sufficiency %" is an example: it is a ratio of numbers
 `computeResults` already returned, computed in the component, and it never feeds
 back into the allocation.
 
+### Yield assumptions
+
+`REGIONS` holds an indicative annual average plus summer and winter figures for
+each state. **They are planning numbers, not measurements.** Published sources
+disagree by a few tenths — CEC-derived zone ratings put Sydney anywhere between
+3.9 and 4.2 — and real yield moves with tilt, orientation, shading and soiling.
+The field is editable for exactly that reason, and the numbers should be
+recalibrated against your own monitoring data as soon as there are enough
+installs to do it.
+
+The seasonal spread matters more than the annual figure when quoting: a customer
+sold on an annual average whose system is commissioned in May judges it against
+the winter number. Quoting Sydney in winter drops production from 4.1 to 3.0
+kWh/kW/day and the sample quote from $429 to $389 a quarter.
+
 ### The verified case
+
+Pinned at the legacy 5.0 kWh/kW/day factor and a lossless battery, so the
+regression suite tests the allocation logic rather than whatever the region
+table or the efficiency default happen to say.
 
 ```
 supply $1.10/day · usage 32c/kWh · feed-in 6c/kWh · 60/40 day-night split
-6.6 kW system · 16 kWh battery · 30-day month
+6.6 kW system · 16 kWh battery · 100% efficiency · 5.0 kWh/kW/day · 30-day month
 → 775 kWh total (465 day / 310 night)
 → day usage fully covered, night usage fully covered
 → 0 kWh of night usage left on the grid
@@ -126,6 +152,35 @@ unchanged. Both views now read from `solarCalc.js`, so neither can drift.
 `savingsPercent` is not, so a customer whose savings exceed their bill saw
 "$0.00" next to "103% off". The studio view now shows the excess as an explicit
 credit alongside the new bill.
+
+## The estimate was over-quoting
+
+Three separate things all pushed the saving the same way — up — and the first
+two have since been addressed:
+
+1. **A hidden 5.0 kWh/kW/day yield.** Optimistic as an annual average for most
+   of the country; roughly 20% high against a Sydney figure of ~4.1. *Fixed:*
+   region + season selector, editable.
+2. **No battery round-trip losses.** Real batteries return about 90% of what
+   goes in. *Fixed:* efficiency input, default 90%, loss shown as a line in the
+   breakdown.
+3. **"Day usage" treated as fully available to the array.** A 60% day split
+   includes early morning and evening when the array produces little or
+   nothing, so self-consumption — the largest single component of the saving —
+   is still the optimistic end. **Not fixed:** doing it properly means modelling
+   the load shape against a production curve rather than splitting a day in two,
+   which is a different calculation, not a tweak to this one. Flagged in the UI
+   instead.
+
+On the sample quote ($450/quarter, 6.6 kW, 16 kWh, Sydney annual) the first two
+together moved the estimate from $464 to $429 a quarter.
+
+## Economics
+
+`computeEconomics` is deliberately separate from `computeResults` — it consumes
+the saving and never feeds back into how energy is allocated. Simple payback
+only: no tariff inflation, no panel degradation, no discount rate, and
+`systemCost` is assumed to be the net price after rebates.
 
 > **Note on the bill figure.** The brief quoted this case as a **$450/month**
 > bill. At 32c/kWh with a $1.10/day supply charge, $450 over 30 days
