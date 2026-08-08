@@ -72,7 +72,9 @@ export default function PylonCalculator({ onOpenClassic }) {
   const [systemSizeKw, setSystemSizeKw] = useState(6.6);
   const [batteryCapacity, setBatteryCapacity] = useState(0); // kWh, 0 = no battery
   const [batteryEfficiency, setBatteryEfficiency] = useState(DEFAULT_BATTERY_EFFICIENCY);
-  const [systemCost, setSystemCost] = useState(0); // $ net of rebates
+  // Mid-market installed price for the default 6.6 kW system, net of STCs, so
+  // the return figures are populated on first load rather than blank.
+  const [systemCost, setSystemCost] = useState(6500); // $ net of rebates
   const [region, setRegion] = useState(DEFAULT_REGION);
   const [season, setSeason] = useState(DEFAULT_SEASON);
 
