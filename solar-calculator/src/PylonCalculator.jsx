@@ -368,7 +368,7 @@ export default function PylonCalculator({ onOpenClassic }) {
               <Card
                 title="Daily energy balance"
                 icon={Zap}
-                subtitle="Averages for one day — the battery fills and empties once per day, then the day is multiplied out across the period."
+                subtitle="Averages for one day — the battery takes back what last night drew out and empties again, then the day is multiplied out across the period."
                 right={
                   <span className="rounded-md bg-slate-100 px-2 py-1 font-mono text-[11.5px] text-slate-500">
                     × {days} days

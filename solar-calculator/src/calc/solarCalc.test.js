@@ -48,9 +48,10 @@ describe("verified case — 775 kWh over 30 days", () => {
     expect(r.nightCoveredByBattery).toBeCloseTo(310, 6);
   });
 
-  it("exports ~1.5 kWh/day", () => {
-    expect(r.dailyExported).toBeCloseTo(1.5, 9);
-    expect(r.exported).toBeCloseTo(45, 6);
+  it("exports the spare solar the battery does not need", () => {
+    // 33 produced − 15.5 day − 10.333 battery top-up = 7.167 exported.
+    expect(r.dailyExported).toBeCloseTo(7.166666666, 6);
+    expect(r.exported).toBeCloseTo(215, 6);
   });
 
   it("produces 33 kWh/day from the 6.6 kW system", () => {
@@ -145,10 +146,39 @@ describe("rule 3 — allocation priority", () => {
     expect(r.remainingDayUsage).toBeGreaterThan(0);
   });
 
-  it("the battery fills before anything is exported", () => {
+  it("tops the battery up by the night load, not to full capacity", () => {
+    // The battery starts the day already holding what last night didn't use,
+    // so it only takes back the 10.333 kWh the night drew out — even with
+    // 17.5 kWh/day spare and 20 kWh of capacity available.
     const r = run({ billAmount: 281, days: 30, batteryCapacity: 20 });
-    // 17.5 kWh/day of excess, 20 kWh of capacity → everything is stored.
-    expect(r.dailyBatteryCharge).toBeCloseTo(17.5, 9);
+    expect(r.dailyBatteryCharge).toBeCloseTo(310 / 30, 9);
+    expect(r.dailyExported).toBeCloseTo(17.5 - 310 / 30, 9);
+  });
+
+  it("strands nothing — everything stored is drawn back out that night", () => {
+    for (const batteryCapacity of [0, 4, 5, 16, 27, 40]) {
+      for (const billAmount of [120, 281, 450, 900]) {
+        for (const days of [30, 91]) {
+          const r = run({ billAmount, days, batteryCapacity });
+          expect(r.nightCoveredByBattery, `${batteryCapacity}kWh/$${billAmount}`)
+            .toBeCloseTo(r.batteryCharge, 9);
+        }
+      }
+    }
+  });
+
+  it("still respects capacity when the night load exceeds it", () => {
+    // 4 kWh battery against a 10.333 kWh night: capacity is the binding cap.
+    const r = run({ billAmount: 281, days: 30, batteryCapacity: 4 });
+    expect(r.dailyBatteryCharge).toBeCloseTo(4, 9);
+    expect(r.dailyRemainingNight).toBeCloseTo(310 / 30 - 4, 9);
+  });
+
+  it("still respects available solar when that is the binding cap", () => {
+    // 26.06 kWh/day of day usage leaves only 6.9375 spare for a 16 kWh
+    // battery facing a 17.375 kWh night — the spare solar is the limit.
+    const r = run({ billAmount: 450, days: 30, batteryCapacity: 16 });
+    expect(r.dailyBatteryCharge).toBeCloseTo(6.9375, 9);
     expect(r.dailyExported).toBeCloseTo(0, 9);
   });
 

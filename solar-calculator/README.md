@@ -45,10 +45,15 @@ change the maths in `computeResults` — it encodes four rules:
    and export maths runs on daily averages first and is multiplied by `days` at
    the very end. *This was a real bug, already found and fixed — don't
    reintroduce it.*
-3. **Priority order.** solar → day usage (self-consumption) → battery (charges
-   with the leftover) → export (whatever remains once the battery is full).
-   Then separately: battery → night usage → grid (whatever the battery can't
-   cover).
+3. **Priority order.** solar → day usage (self-consumption) → battery (takes
+   the top-up it needs) → export (everything else). Then separately:
+   battery → night usage → grid (whatever the battery can't cover).
+
+   The battery is topped up by **what last night drew out of it**, not to its
+   full capacity — it starts each day already holding whatever the night didn't
+   consume. A 16 kWh battery serving a 10 kWh night load takes on 10 kWh and
+   the rest of the spare solar is exported. So the daily charge is capped three
+   ways: `min(spare solar, capacity, night load)`.
 4. **Production factor is fixed at 5 kWh/kW/day** and is intentionally not
    exposed as an input in the UI.
 
@@ -64,13 +69,18 @@ supply $1.10/day · usage 32c/kWh · feed-in 6c/kWh · 60/40 day-night split
 6.6 kW system · 16 kWh battery · 30-day month
 → 775 kWh total (465 day / 310 night)
 → day usage fully covered, night usage fully covered
-→ 1.5 kWh/day exported, 0 kWh of night usage left on the grid
+→ 0 kWh of night usage left on the grid
+→ 33 produced − 15.5 day − 10.33 battery top-up = 7.17 kWh/day exported
 ```
 
-`npm test` pins every one of those numbers, plus a guard per rule above — most
-usefully, that a month and a quarter describing the *same daily consumption*
-produce identical daily figures, which is what breaks the moment the battery cap
-is applied to a period total instead of a day.
+`npm test` pins every one of those numbers, plus a guard per rule above. Two
+guards earn their keep:
+
+- a month and a quarter describing the *same daily consumption* must produce
+  identical daily figures — this breaks the moment the battery cap is applied
+  to a period total instead of a day;
+- `nightCoveredByBattery == batteryCharge` across every battery size and bill —
+  nothing may be stored that isn't drawn back out.
 
 ## Audit findings
 
@@ -85,31 +95,35 @@ The calculation was swept across 240 input combinations (2 periods × 6 bills ×
   overstate a saving. `selfConsumed ≤ dayKwh` and `nightCovered ≤ nightKwh`
   hold by construction.
 
-**Known gap — stored energy that is never used or credited.**
+**Fixed — stored energy that was never used or credited.**
 
-Rule 3 fills the battery to capacity before anything is exported, and the
-battery only ever discharges into night usage. When the battery is larger than
-the night load, the difference is neither consumed nor exported, so it earns no
-feed-in credit and simply leaves the accounting:
+The battery used to fill to capacity before anything was exported, while only
+ever discharging into night usage. Whenever the battery was larger than the
+night load, the difference was neither consumed nor exported: it earned no
+feed-in credit and simply left the accounting.
 
 ```
-$450/quarter, 6.6 kW, 16 kWh battery
-production 3003 kWh = self 656 + charged 1456 + exported 891
-of the 1456 kWh charged, only 437 kWh is used at night
-→ 1019 kWh earns nothing.  At 6c that is $61 of unclaimed feed-in.
+before:  $450/quarter, 6.6 kW, 16 kWh battery
+         production 3003 kWh = self 656 + charged 1456 + exported 891
+         of the 1456 kWh charged, only 437 kWh was used at night
+         → 1019 kWh earned nothing.  At 6c that is $61 of unclaimed feed-in.
+
+after:   production 3003 kWh = self 656 + charged 437 + exported 1910
+         everything charged is drawn back out that night
+         → quote goes from $403.36 to $464.47
 ```
 
-Worst case in the sweep (27 kWh battery, low bill): 2457 kWh, about $147 per
-quarter.
+Worst case found in the sweep (27 kWh battery, low bill) was 2457 kWh, about
+$147 per quarter.
 
-This is a direct consequence of the locked priority order, not a coding slip.
-Correcting it means charging `min(excess, capacity, nightUsage)` and exporting
-the remainder — which changes the verified case (export 1.50 → 7.17 kWh/day,
-saving $250.70 → $260.90) and so is deliberately **not** applied. The estimate
-errs conservative: it understates the saving, never overstates it.
+The fix is rule 3 as it now stands: the battery takes the top-up it needs,
+`min(spare solar, capacity, night load)`, and everything else is sold. This
+moved the verified case's export figure from 1.50 to 7.17 kWh/day and its
+saving from $250.70 to $260.90; the day and night coverage in that case is
+unchanged. Both views now read from `solarCalc.js`, so neither can drift.
 
-**Fixed (display only, locked block untouched):** `newBill` is floored at zero
-while `savingsPercent` is not, so a customer whose savings exceed their bill saw
+**Also fixed (display only):** `newBill` is floored at zero while
+`savingsPercent` is not, so a customer whose savings exceed their bill saw
 "$0.00" next to "103% off". The studio view now shows the excess as an explicit
 credit alongside the new bill.
 

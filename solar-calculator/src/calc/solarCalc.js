@@ -12,18 +12,25 @@ import { useMemo } from "react";
  *      production / export figure is computed on daily averages first, and
  *      only multiplied by `days` at the very end. (This was a real bug that
  *      has already been found and fixed — do not reintroduce it.)
- *   3. Priority: solar -> day usage (self-consumption) -> battery (charges
- *      with the leftover) -> export (whatever is left once the battery is
- *      full). Then separately: battery -> night usage -> grid (whatever the
- *      battery cannot cover).
+ *   3. Priority: solar -> day usage (self-consumption) -> battery (takes the
+ *      top-up it needs) -> export (everything else). Then separately:
+ *      battery -> night usage -> grid (whatever the battery cannot cover).
  *   4. `productionFactor` is fixed at 5 kWh/kW/day and is intentionally not
  *      exposed as an input in the UI.
  *
+ * On rule 3: the battery is topped up by the amount last night drew out of it,
+ * NOT to its full capacity. It begins each day already holding whatever the
+ * night did not consume, so a 16 kWh battery serving a 10 kWh night load takes
+ * on 10 kWh and the rest of the spare solar is exported. Filling to capacity
+ * instead would strand energy in the battery that is neither consumed nor sold
+ * — on a 16 kWh battery against a 4.8 kWh night load that was roughly 1,000
+ * kWh, about $61 of unclaimed feed-in, per quarter.
+ *
  * Verified test case (see solarCalc.test.js — run `npm test` after ANY change
- * to this file): $450/month bill, $1.10/day supply, 32c/kWh usage, 6c/kWh
+ * to this file): $281/month bill, $1.10/day supply, 32c/kWh usage, 6c/kWh
  * feed-in, 60/40 day-night split, 6.6 kW system, 16 kWh battery
  *   -> 775 kWh total (465 day / 310 night), day and night usage both fully
- *      covered, ~1.5 kWh/day exported, zero night usage left on the grid.
+ *      covered, zero night usage left on the grid, 7.17 kWh/day exported.
  */
 
 export const PRODUCTION_FACTOR = 5.0; // kWh/kW/day — fixed, not a UI input
@@ -67,10 +74,20 @@ export function computeResults({
   const dailyExcess = Math.max(0, dailyProduction - dailyDayKwh);
   const dailyRemainingDay = Math.max(0, dailyDayKwh - dailyProduction);
 
-  const dailyBatteryCharge = Math.min(dailyExcess, batteryKwh);
+  // The battery starts the day part-full: it only lost whatever last night
+  // drew out of it. So the top-up it needs is the night load, not its whole
+  // capacity — a 16 kWh battery covering 10 kWh of night usage takes 10 kWh
+  // back and the remaining 6 kWh is still sitting there. The charge is
+  // therefore capped three ways: by the solar actually spare, by the physical
+  // capacity, and by the night load it has to refill for.
+  const dailyBatteryCharge = Math.min(dailyExcess, batteryKwh, dailyNightKwh);
+
+  // Everything past that top-up is sold instead of sitting in a full battery
+  // earning nothing.
   const dailyExported = dailyExcess - dailyBatteryCharge;
 
-  const dailyNightCovered = Math.min(dailyBatteryCharge, dailyNightKwh);
+  // In steady state the battery gives back exactly what it took on.
+  const dailyNightCovered = dailyBatteryCharge;
   const dailyRemainingNight = Math.max(0, dailyNightKwh - dailyNightCovered);
 
   // Scale daily figures back up to the full billing period

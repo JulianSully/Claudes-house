@@ -1,7 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Sun, Moon, Zap, TrendingDown, Info, BatteryCharging } from "lucide-react";
 
-const NUMBER = (v) => (Number.isFinite(v) ? v : 0);
+import { useSolarResults, NUMBER } from "./calc/solarCalc";
 
 function Field({ label, suffix, value, onChange, step = "0.1", min = "0" }) {
   return (
@@ -27,6 +27,11 @@ function Field({ label, suffix, value, onChange, step = "0.1", min = "0" }) {
   );
 }
 
+/**
+ * The original dark estimator. The layout is untouched; the calculation that
+ * used to live inline here now comes from ./calc/solarCalc so this view and the
+ * studio view can never drift apart.
+ */
 export default function SolarSavingsCalculator() {
   const [supplyCharge, setSupplyCharge] = useState(1.1); // $/day
   const [usageCharge, setUsageCharge] = useState(32); // c/kWh
@@ -41,63 +46,11 @@ export default function SolarSavingsCalculator() {
   const days = billPeriod === "monthly" ? 30 : 91;
   const nightPercent = 100 - dayPercent;
 
-  const results = useMemo(() => {
-    const bill = NUMBER(billAmount);
-    const supply = NUMBER(supplyCharge);
-    const usageRate = NUMBER(usageCharge) / 100;
-    const fit = NUMBER(feedInTariff) / 100;
-    const sizeKw = NUMBER(systemSizeKw);
-    const prodFactor = NUMBER(productionFactor);
-    const batteryKwh = NUMBER(batteryCapacity);
-
-    const supplyCostTotal = supply * days;
-    const usagePortion = Math.max(0, bill - supplyCostTotal);
-    const totalKwh = usageRate > 0 ? usagePortion / usageRate : 0;
-
-    const dayKwh = totalKwh * (dayPercent / 100);
-    const nightKwh = totalKwh * (nightPercent / 100);
-
-    // Work in daily averages so the battery charges/discharges once per day,
-    // not once for the whole billing period
-    const dailyDayKwh = dayKwh / days;
-    const dailyNightKwh = nightKwh / days;
-    const dailyProduction = sizeKw * prodFactor;
-
-    const dailySelfConsumed = Math.min(dailyProduction, dailyDayKwh);
-    const dailyExcess = Math.max(0, dailyProduction - dailyDayKwh);
-    const dailyRemainingDay = Math.max(0, dailyDayKwh - dailyProduction);
-
-    const dailyBatteryCharge = Math.min(dailyExcess, batteryKwh);
-    const dailyExported = dailyExcess - dailyBatteryCharge;
-
-    const dailyNightCovered = Math.min(dailyBatteryCharge, dailyNightKwh);
-    const dailyRemainingNight = Math.max(0, dailyNightKwh - dailyNightCovered);
-
-    // Scale daily figures back up to the full billing period
-    const systemProduction = dailyProduction * days;
-    const selfConsumed = dailySelfConsumed * days;
-    const exported = dailyExported * days;
-    const remainingDayUsage = dailyRemainingDay * days;
-    const batteryCharge = dailyBatteryCharge * days;
-    const nightCoveredByBattery = dailyNightCovered * days;
-    const remainingNightUsage = dailyRemainingNight * days;
-
-    const savingsSelfConsumed = selfConsumed * usageRate;
-    const savingsExport = exported * fit;
-    const savingsBattery = nightCoveredByBattery * usageRate;
-    const totalSavings = savingsSelfConsumed + savingsExport + savingsBattery;
-
-    const newBill = Math.max(0, bill - totalSavings);
-    const savingsPercent = bill > 0 ? (totalSavings / bill) * 100 : 0;
-
-    return {
-      totalKwh, dayKwh, nightKwh, systemProduction,
-      selfConsumed, exported, remainingDayUsage,
-      batteryCharge, nightCoveredByBattery, remainingNightUsage,
-      savingsSelfConsumed, savingsExport, savingsBattery, totalSavings,
-      newBill, savingsPercent,
-    };
-  }, [supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod, dayPercent, systemSizeKw, productionFactor, batteryCapacity, days, nightPercent]);
+  const results = useSolarResults({
+    supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
+    dayPercent, systemSizeKw, productionFactor, batteryCapacity,
+    days, nightPercent,
+  });
 
   const fmt$ = (n) => `$${NUMBER(n).toFixed(2)}`;
   const fmtKwh = (n) => `${NUMBER(n).toFixed(0)} kWh`;
@@ -206,9 +159,10 @@ export default function SolarSavingsCalculator() {
                 <Field label="Battery capacity" suffix="kWh" value={batteryCapacity} onChange={setBatteryCapacity} step="0.5" />
                 <p className="flex items-start gap-1.5 text-[11px] text-slate-500 leading-relaxed">
                   <Info size={13} className="mt-0.5 shrink-0" />
-                  Leftover solar after covering day usage charges the battery, up to its capacity.
-                  That stored charge then offsets night usage instead of paying full rate. Leave at
-                  0 for a solar-only estimate.
+                  Leftover solar after covering day usage tops the battery back up by whatever
+                  last night drew out of it, and the rest is exported. That stored charge then
+                  offsets night usage instead of paying full rate. Leave at 0 for a solar-only
+                  estimate.
                 </p>
               </div>
             </section>
