@@ -1,7 +1,8 @@
-# Solar + Battery Savings Calculator
+# Helios
 
-A quick-quoting estimator: enter a customer's bill and tariff, split their usage
-between day and night, size a system and a battery, and read out the saving.
+Solar + battery quoting. Enter a customer's bill and tariff, split their usage
+between day and night, size a system and a battery, and read out the saving,
+the energy balance and the payback.
 
 Two shells sit over one set of locked maths:
 

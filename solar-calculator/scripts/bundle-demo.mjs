@@ -25,7 +25,7 @@ const css = readFileSync(join(distAssets, cssFile), "utf8");
 // A literal </script> inside a string in the bundle would close the tag early.
 const js = readFileSync(join(distAssets, jsFile), "utf8").replace(/<\/script/gi, "<\\/script");
 
-const html = `<title>Solar + Battery Savings Calculator</title>
+const html = `<title>Helios — Solar + Battery Savings</title>
 <style>
 ${css}
 

@@ -73,7 +73,7 @@ export default function SolarSavingsCalculator() {
         <div className="mb-8">
           <div className="flex items-center gap-2 text-amber-400 text-[11px] font-semibold tracking-[0.2em] uppercase mb-2">
             <Sun size={14} strokeWidth={2.5} />
-            Solar Savings Estimator
+            Helios · Savings Estimator
           </div>
           <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white">
             Bill in. Savings out.

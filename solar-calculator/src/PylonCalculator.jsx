@@ -133,7 +133,10 @@ export default function PylonCalculator({ onOpenClassic }) {
     <div className="flex min-h-screen w-full bg-slate-50 font-sans text-slate-900 antialiased lg:h-screen lg:min-h-0">
       {/* ---------- icon rail ---------- */}
       <nav className="hidden sm:flex w-[60px] shrink-0 flex-col items-center bg-ink-900 py-3">
-        <div className="mb-4 grid h-9 w-9 place-items-center rounded-lg bg-brand-500 text-white shadow-pop">
+        <div
+          className="mb-4 grid h-9 w-9 place-items-center rounded-lg bg-brand-500 text-white shadow-pop"
+          title="Helios"
+        >
           <Sun size={18} strokeWidth={2.5} />
         </div>
         <div className="flex flex-1 flex-col gap-1">
@@ -170,6 +173,10 @@ export default function PylonCalculator({ onOpenClassic }) {
         <header className="sticky top-0 z-20 shrink-0 border-b border-slate-200 bg-white lg:static">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 py-2.5">
             <div className="flex min-w-0 items-center gap-2">
+              <span className="text-[14px] font-semibold tracking-[-0.01em] text-slate-900">
+                Helios
+              </span>
+              <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
               <span className="text-[13px] text-slate-400">Projects</span>
               <ChevronRight size={13} className="text-slate-300" />
               <h1 className="truncate text-[14px] font-semibold text-slate-900">
