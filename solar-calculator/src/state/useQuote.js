@@ -32,6 +32,9 @@ export function useQuote() {
 
   // Current bill
   const [billAmount, setBillAmount] = useState(450);
+  // "known" reads the kWh off the bill; "fromBill" works it back from dollars.
+  const [usageMode, setUsageMode] = useState("fromBill");
+  const [knownUsageKwh, setKnownUsageKwh] = useState(0);
   const [billPeriod, setBillPeriod] = useState("quarterly"); // monthly | quarterly
   const [dayPercent, setDayPercent] = useState(60);
 
@@ -58,6 +61,7 @@ export function useQuote() {
 
   const results = useSolarResults({
     supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
+    knownUsageKwh: usageMode === "known" ? knownUsageKwh : 0,
     dayPercent, systemSizeKw, productionFactor, batteryCapacity,
     batteryEfficiency, days, nightPercent,
   });
@@ -96,6 +100,8 @@ export function useQuote() {
     feedInTariff, setFeedInTariff,
     // bill
     billAmount, setBillAmount,
+    usageMode, setUsageMode,
+    knownUsageKwh, setKnownUsageKwh,
     billPeriod, setBillPeriod,
     dayPercent, setDayPercent,
     nightPercent,

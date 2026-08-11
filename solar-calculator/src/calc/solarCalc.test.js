@@ -339,7 +339,10 @@ describe("edge cases", () => {
       systemSizeKw: "", productionFactor: "", batteryCapacity: "",
       dayPercent: 60, nightPercent: 40, days: 30,
     });
+    // Every numeric output must be a real number — no NaN leaking into the
+    // UI. `usageFromBill` is a flag, not a figure, so it is exempt.
     for (const [key, value] of Object.entries(r)) {
+      if (typeof value === "boolean") continue;
       expect(Number.isFinite(value), key).toBe(true);
     }
     expect(r.totalKwh).toBe(0);
@@ -356,5 +359,61 @@ describe("edge cases", () => {
     expect(r.savingsBattery).toBe(0);
     expect(r.remainingNightUsage).toBeCloseTo(310, 6);
     expect(r.dailyExported).toBeCloseTo(17.5, 9);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Reading the usage off the bill instead of working it back.
+ *
+ * Working it back assumes one flat rate for every kWh. Controlled-load hot
+ * water, an off-peak block, a tiered rate or a pay-on-time discount all put
+ * the customer's real average below the headline rate — and dividing by the
+ * headline rate then UNDERSTATES how much power they use. Reading the printed
+ * kWh off the bill removes the whole class of error.
+ * ------------------------------------------------------------------ */
+describe("usage stated from the bill", () => {
+  it("uses the stated figure instead of back-calculating", () => {
+    const r = run({ billAmount: 200, supplyCharge: 1.7, days: 30, knownUsageKwh: 600 });
+    expect(r.totalKwh).toBe(600);
+    expect(r.dayKwh).toBeCloseTo(360, 9);
+    expect(r.nightKwh).toBeCloseTo(240, 9);
+    expect(r.usageFromBill).toBe(false);
+  });
+
+  it("reports what the customer really pays per kWh", () => {
+    // $200 bill, $51 of supply, 600 kWh actually used → 24.8c, not the 32c
+    // on the tariff sheet. That gap is the tell.
+    const r = run({ billAmount: 200, supplyCharge: 1.7, days: 30, knownUsageKwh: 600 });
+    expect(r.usagePortion).toBeCloseTo(149, 9);
+    expect(r.effectiveRate * 100).toBeCloseTo(24.833, 3);
+  });
+
+  it("falls back to back-calculating when no figure is given", () => {
+    const stated = run({ billAmount: 200, supplyCharge: 1.7, days: 30, knownUsageKwh: 0 });
+    const implied = run({ billAmount: 200, supplyCharge: 1.7, days: 30 });
+    expect(stated.totalKwh).toBeCloseTo(149 / 0.32, 6);
+    expect(implied.totalKwh).toBeCloseTo(stated.totalKwh, 9);
+    expect(implied.usageFromBill).toBe(true);
+  });
+
+  it("back-calculation understates usage whenever the real rate is lower", () => {
+    const args = { billAmount: 200, supplyCharge: 1.7, days: 30 };
+    const backCalculated = run(args).totalKwh; // assumes all 600 kWh at 32c
+    const actual = run({ ...args, knownUsageKwh: 600 }).totalKwh;
+    expect(backCalculated).toBeLessThan(actual);
+    expect(backCalculated).toBeCloseTo(465.625, 3);
+  });
+
+  it("a stated figure ignores the tariff entirely", () => {
+    for (const usageCharge of [20, 32, 55]) {
+      expect(run({ billAmount: 200, days: 30, usageCharge, knownUsageKwh: 600 }).totalKwh).toBe(600);
+    }
+  });
+
+  it("negative or junk stated usage falls back rather than breaking", () => {
+    for (const knownUsageKwh of [-100, "", NaN, undefined]) {
+      const r = run({ billAmount: 281, days: 30, knownUsageKwh });
+      expect(r.totalKwh, String(knownUsageKwh)).toBeCloseTo(775, 6);
+    }
   });
 });

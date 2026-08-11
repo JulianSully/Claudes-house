@@ -90,6 +90,7 @@ export const NUMBER = (v) => (Number.isFinite(v) ? v : 0);
 
 export function computeResults({
   billAmount,
+  knownUsageKwh, // kWh straight off the bill; wins over the back-calculation
   supplyCharge,
   usageCharge,
   feedInTariff,
@@ -111,7 +112,27 @@ export function computeResults({
 
   const supplyCostTotal = supply * days;
   const usagePortion = Math.max(0, bill - supplyCostTotal);
-  const totalKwh = usageRate > 0 ? usagePortion / usageRate : 0;
+
+  // Two ways to know how much power the house uses:
+  //
+  //   1. READ IT OFF THE BILL. Every Australian bill prints the kWh. When the
+  //      rep has that number, use it — it is a measurement.
+  //   2. WORK IT BACK from the dollar amount. Only as good as the assumption
+  //      that every kWh was billed at one flat rate, which is wrong the moment
+  //      there is controlled-load hot water, an off-peak block, a tiered rate
+  //      or a pay-on-time discount on the account. Each of those means the
+  //      customer's average rate is below the headline one, and dividing by
+  //      the headline rate then UNDERSTATES how much power they actually use.
+  //
+  // Path 2 is the fallback, not the default, for exactly that reason.
+  const stated = NUMBER(knownUsageKwh);
+  const backCalculated = usageRate > 0 ? usagePortion / usageRate : 0;
+  const totalKwh = stated > 0 ? stated : backCalculated;
+
+  // What the customer is actually paying per kWh once the supply charge is
+  // taken out. When this sits well below the headline rate, something on the
+  // account is cheaper than the tariff sheet says — worth the rep noticing.
+  const effectiveRate = totalKwh > 0 ? usagePortion / totalKwh : 0;
 
   const dayKwh = totalKwh * (dayPercent / 100);
   const nightKwh = totalKwh * (nightPercent / 100);
@@ -168,6 +189,7 @@ export function computeResults({
 
   return {
     totalKwh, dayKwh, nightKwh, systemProduction,
+    usagePortion, effectiveRate, usageFromBill: !(NUMBER(knownUsageKwh) > 0),
     selfConsumed, exported, remainingDayUsage,
     batteryCharge, nightCoveredByBattery, batteryLoss, remainingNightUsage,
     savingsSelfConsumed, savingsExport, savingsBattery, totalSavings,
@@ -210,18 +232,18 @@ export function useSolarResults(inputs) {
   const {
     supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
     dayPercent, systemSizeKw, productionFactor, batteryCapacity,
-    batteryEfficiency = 100, days, nightPercent,
+    batteryEfficiency = 100, days, nightPercent, knownUsageKwh,
   } = inputs;
 
   return useMemo(
     () =>
       computeResults({
-        billAmount, supplyCharge, usageCharge, feedInTariff,
+        billAmount, knownUsageKwh, supplyCharge, usageCharge, feedInTariff,
         systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency,
         dayPercent, nightPercent, days,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod, dayPercent, systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency, days, nightPercent]
+    [supplyCharge, usageCharge, feedInTariff, billAmount, knownUsageKwh, billPeriod, dayPercent, systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency, days, nightPercent]
   );
 }
 

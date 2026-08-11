@@ -48,6 +48,35 @@ src/
   App.jsx                   mode toggle, share-link routing
 ```
 
+## How usage is established
+
+Two ways, and the order matters.
+
+**Read the kWh off the bill** (preferred). Every Australian bill prints it. It's
+a measurement, so nothing can distort it.
+
+**Work it back from the dollar amount** (fallback). `(bill − supply charge) ÷
+usage rate`. This assumes every kWh was billed at one flat rate, which is wrong
+the moment the account has controlled-load hot water, an off-peak block, a
+tiered rate or a pay-on-time discount. Each of those puts the customer's real
+average rate *below* the headline one — and dividing by the headline rate then
+**understates** how much power they actually use.
+
+Worked example, from a rep who spotted it in the field:
+
+```
+$200/month bill · $1.70/day supply · 32c/kWh
+  → ($200 − $51 supply) ÷ 32c = 466 kWh/month = 15.5 kWh/day
+
+But if that customer really uses 20 kWh/day (600 kWh), their average
+rate is 24.8c, not 32c — and the back-calculation was 22% low.
+```
+
+When usage is stated directly, the app divides the bill's usage portion by it
+and shows the customer's real rate. More than 8% away from the entered tariff
+and it says so, because that gap is a controlled load or a discount worth
+knowing about before quoting.
+
 ## The house image
 
 Two paths, because one of them has to work on a rep's phone in a driveway:

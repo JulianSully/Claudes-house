@@ -61,6 +61,8 @@ export default function RepMode({ q, modeToggle }) {
     usageCharge, setUsageCharge,
     feedInTariff, setFeedInTariff,
     billAmount, setBillAmount,
+    usageMode, setUsageMode,
+    knownUsageKwh, setKnownUsageKwh,
     billPeriod, setBillPeriod,
     dayPercent, setDayPercent, nightPercent,
     systemSizeKw, setSystemSizeKw,
@@ -289,15 +291,49 @@ export default function RepMode({ q, modeToggle }) {
                   { value: "quarterly", label: "Qtr" },
                 ]}
               />
-              <div className="mt-1 rounded-lg bg-slate-50 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-500">
-                Usage is back-calculated from the bill:{" "}
-                <span className="font-mono text-slate-700">
-                  ({fmt$(billAmount)} − {fmt$(supplyCharge * days)} supply) ÷{" "}
-                  {usageCharge || 0}c
-                </span>{" "}
-                = <span className="font-mono text-slate-700">{fmtKwh(results.totalKwh)}</span>{" "}
-                over {days} days.
-              </div>
+              <Segmented
+                label="Power used"
+                value={usageMode}
+                onChange={setUsageMode}
+                options={[
+                  { value: "known", label: "kWh" },
+                  { value: "fromBill", label: "Work out" },
+                ]}
+              />
+
+              {usageMode === "known" ? (
+                <>
+                  <InputRow
+                    label="Usage on the bill"
+                    hint={`kWh for the ${periodWord}`}
+                    unit="kWh"
+                    value={knownUsageKwh}
+                    onChange={setKnownUsageKwh}
+                    step="10"
+                  />
+                  <RateCheck
+                    results={results}
+                    usageCharge={usageCharge}
+                    fmt$={fmt$}
+                  />
+                </>
+              ) : (
+                <div className="mt-1 rounded-lg bg-slate-50 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-500">
+                  Worked back from the bill:{" "}
+                  <span className="font-mono text-slate-700">
+                    ({fmt$(billAmount)} − {fmt$(supplyCharge * days)} supply) ÷{" "}
+                    {usageCharge || 0}c
+                  </span>{" "}
+                  = <span className="font-mono text-slate-700">{fmtKwh(results.totalKwh)}</span>{" "}
+                  over {days} days.
+                  <span className="mt-1.5 block text-slate-400">
+                    This assumes every kWh was billed at {usageCharge || 0}c. Controlled-load
+                    hot water, an off-peak block or a pay-on-time discount all make the real
+                    average lower — which makes this figure too low. Read the kWh off the
+                    bill instead when you have it.
+                  </span>
+                </div>
+              )}
             </Panel>
 
             <Panel title="Usage profile" icon={Gauge}>
@@ -769,5 +805,46 @@ function BreakdownRow({ color, label, note, energy, rate, value, muted }) {
         {value}
       </td>
     </tr>
+  );
+}
+
+/**
+ * When the rep types the kWh straight off the bill, the usage charge stops
+ * being an input and becomes a cross-check: divide what's left of the bill
+ * after the supply charge by the kWh, and you get what the customer actually
+ * pays per unit. A gap between that and the tariff sheet is real — it's
+ * controlled load, an off-peak block, or a discount — and it's worth the rep
+ * seeing rather than silently absorbing.
+ */
+function RateCheck({ results, usageCharge, fmt$ }) {
+  const effective = results.effectiveRate * 100; // c/kWh
+  const headline = Number.isFinite(usageCharge) ? usageCharge : 0;
+  if (!Number.isFinite(effective) || effective <= 0) return null;
+
+  const gap = headline > 0 ? (effective - headline) / headline : 0;
+  const off = Math.abs(gap) > 0.08; // more than 8% apart is worth a word
+
+  return (
+    <div
+      className={`mt-1 rounded-lg px-3 py-2.5 text-[11.5px] leading-relaxed ${
+        off ? "bg-amber-50 text-amber-900" : "bg-slate-50 text-slate-500"
+      }`}
+    >
+      Their bill works out to{" "}
+      <span className="font-mono font-semibold">{effective.toFixed(1)}c</span> per kWh
+      {off ? (
+        <>
+          {" "}
+          — {effective < headline ? "below" : "above"} the {headline}c you've entered. That
+          usually means {effective < headline
+            ? "controlled-load hot water, an off-peak block or a discount on the account"
+            : "peak-rate usage or a tiered block above the headline rate"}
+          . The savings below use {headline}c, so check which rate their solar actually
+          offsets.
+        </>
+      ) : (
+        <> — in line with the {headline}c entered.</>
+      )}
+    </div>
   );
 }
