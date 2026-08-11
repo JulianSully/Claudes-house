@@ -4,13 +4,19 @@ Solar + battery quoting. Enter a customer's bill and tariff, split their usage
 between day and night, size a system and a battery, and read out the saving,
 the energy balance and the payback.
 
-Two shells sit over one set of locked maths:
+Two modes over one quote, switched from the toggle in the header:
 
-- **Studio** (default) — a solar-software workspace UI: dark icon rail, project
-  header with stage tabs, a properties panel of inputs on the left and the energy
-  and savings read-out on the right.
-- **Classic** — the original dark estimator, kept verbatim. Toggle from the
-  "Classic view" button in the header.
+- **Rep input** — every field on screen at once, built for punching numbers in
+  fast while talking to a customer. Dark icon rail, properties panel on the
+  left, energy and savings read-out on the right.
+- **Show customer** — the screen the rep turns around. Plain English, big
+  numbers, a donut of where their power comes from, and the export actions. No
+  industry words: a customer reads "power you sell back to the grid", never
+  "feed-in tariff".
+
+A third path has no toggle: opening a **share link** renders the proposal
+read-only, because whoever follows that link is the customer at their kitchen
+table, not the rep.
 
 ## Run it
 
@@ -25,14 +31,56 @@ npm run build
 
 ```
 src/
-  calc/solarCalc.js        LOCKED calculation — computeResults() + useSolarResults()
-                           plus REGIONS (yield table) and computeEconomics()
-  calc/solarCalc.test.js   verified case + one guard per locked rule
-  PylonCalculator.jsx      studio UI (default view)
-  SolarSavingsCalculator.jsx  original dark estimator, verbatim
-  components/ui.jsx        panels, property rows, stat tiles, allocation bars
-  App.jsx                  view toggle
+  calc/solarCalc.js         LOCKED calculation — computeResults() + useSolarResults()
+                            plus REGIONS (yield table) and computeEconomics()
+  calc/solarCalc.test.js    verified case + one guard per locked rule
+  state/useQuote.js         one quote's inputs, shared by both modes
+  lib/format.js             AUD and en-AU formatting — all of it, in one place
+  lib/proposal.js           buildProposal() → plain data; share-link encoding
+  lib/proposal.test.js
+  lib/siteImage.js          upload + satellite providers, address tidying
+  RepMode.jsx               the rep's input screen
+  CustomerMode.jsx          presentation wrapper — document + export actions
+  ProposalDocument.jsx      the customer-facing proposal, rendered from data
+  components/SitePanel.jsx  address, customer name, house image
+  components/EnergyDonut.jsx
+  components/ui.jsx         panels, property rows, stat tiles, allocation bars
+  App.jsx                   mode toggle, share-link routing
 ```
+
+## The house image
+
+Two paths, because one of them has to work on a rep's phone in a driveway:
+
+- **Upload** — always available. Pick a photo or a screenshot; it's read as a
+  data URL so it travels with the proposal and needs no hosting.
+- **Aerial view** — needs a Google Maps key. Set `VITE_MAP_KEY` (and optionally
+  `VITE_MAP_PROVIDER`) and the button appears; without it the app just doesn't
+  offer it. A static-maps key is visible to anyone who loads the page, so
+  restrict it by HTTP referrer in the Google console and don't reuse a key with
+  billing-heavy APIs enabled.
+
+The image is for personalisation and trust, not precision. It carries a system
+size label and nothing else — deliberately not a panel-placement tool.
+
+## The proposal, and getting it out
+
+`buildProposal()` turns the live quote into one plain serialisable object.
+Everything downstream renders from that object rather than from React state:
+the customer screen, the printed PDF, and the share link.
+
+- **Download proposal** uses the browser's own print-to-PDF against the print
+  stylesheet in `index.css`. No PDF dependency, text stays selectable, and it
+  works on the tablet the rep is already holding.
+- **Share link** encodes the proposal into the URL hash, so it needs no
+  backend. Images are dropped from the link — a data URL would blow past URL
+  length limits — so the PDF is the one that carries the house.
+
+**On adding e-signature later:** the seam is already there. A signing service
+wants a document plus signer details, and the proposal object *is* that
+document. Its `signature` field is null until a provider fills it in. When the
+time comes: POST the object, keep the returned envelope id, populate
+`signature`. No other part of the app has to change.
 
 ## The locked calculation
 

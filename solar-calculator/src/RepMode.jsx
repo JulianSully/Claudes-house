@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Sun,
   Moon,
@@ -20,17 +20,10 @@ import {
   Wallet,
 } from "lucide-react";
 
-import {
-  useSolarResults,
-  computeEconomics,
-  productionFactorFor,
-  DAYS_IN_PERIOD,
-  REGIONS,
-  SEASONS,
-  DEFAULT_REGION,
-  DEFAULT_SEASON,
-  DEFAULT_BATTERY_EFFICIENCY,
-} from "./calc/solarCalc";
+import { REGIONS, SEASONS } from "./calc/solarCalc";
+import SitePanel from "./components/SitePanel";
+import { tidyAddress } from "./lib/siteImage";
+import { money, kwh, kwh1, money0, years } from "./lib/format";
 import {
   Panel,
   InputRow,
@@ -62,72 +55,32 @@ const NAV = [
 
 const STAGES = ["Design", "Energy", "Proposal", "Contract"];
 
-export default function PylonCalculator({ onOpenClassic }) {
-  const [supplyCharge, setSupplyCharge] = useState(1.1); // $/day
-  const [usageCharge, setUsageCharge] = useState(32); // c/kWh
-  const [feedInTariff, setFeedInTariff] = useState(6); // c/kWh
-  const [billAmount, setBillAmount] = useState(450);
-  const [billPeriod, setBillPeriod] = useState("quarterly"); // monthly | quarterly
-  const [dayPercent, setDayPercent] = useState(60);
-  const [systemSizeKw, setSystemSizeKw] = useState(6.6);
-  const [batteryCapacity, setBatteryCapacity] = useState(0); // kWh, 0 = no battery
-  const [batteryEfficiency, setBatteryEfficiency] = useState(DEFAULT_BATTERY_EFFICIENCY);
-  // Mid-market installed price for the default 6.6 kW system, net of STCs, so
-  // the return figures are populated on first load rather than blank.
-  const [systemCost, setSystemCost] = useState(6500); // $ net of rebates
-  const [region, setRegion] = useState(DEFAULT_REGION);
-  const [season, setSeason] = useState(DEFAULT_SEASON);
+export default function RepMode({ q, modeToggle }) {
+  const {
+    supplyCharge, setSupplyCharge,
+    usageCharge, setUsageCharge,
+    feedInTariff, setFeedInTariff,
+    billAmount, setBillAmount,
+    billPeriod, setBillPeriod,
+    dayPercent, setDayPercent, nightPercent,
+    systemSizeKw, setSystemSizeKw,
+    batteryCapacity, setBatteryCapacity,
+    batteryEfficiency, setBatteryEfficiency,
+    systemCost, setSystemCost,
+    region, setRegion, season, setSeason,
+    productionFactor, setFactorOverride, suggestedFactor, factorIsOverridden,
+    customerName, setCustomerName,
+    address, setAddress,
+    siteImage, setSiteImage,
+    days, periodWord, periodShort,
+    results, economics, derived, hasBattery,
+  } = q;
 
-  // Region + season drive the yield, but it stays editable: the moment it is
-  // typed over, the region select stops steering it.
-  const [factorOverride, setFactorOverride] = useState(null);
-  const suggestedFactor = productionFactorFor(region, season);
-  const productionFactor = factorOverride ?? suggestedFactor;
-  const factorIsOverridden =
-    factorOverride !== null && Math.abs(factorOverride - suggestedFactor) > 1e-9;
+  const { gridDrawn, selfSufficiency, credit } = derived;
 
-  const setRegionAndClear = (v) => {
-    setRegion(v);
-    setFactorOverride(null);
-  };
-  const setSeasonAndClear = (v) => {
-    setSeason(v);
-    setFactorOverride(null);
-  };
-
-  const days = DAYS_IN_PERIOD[billPeriod];
-  const nightPercent = 100 - dayPercent;
-  const periodWord = billPeriod === "monthly" ? "month" : "quarter";
-  const periodShort = billPeriod === "monthly" ? "mo" : "qtr";
-
-  const results = useSolarResults({
-    supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
-    dayPercent, systemSizeKw, productionFactor, batteryCapacity,
-    batteryEfficiency, days, nightPercent,
-  });
-
-  const economics = computeEconomics({
-    totalSavings: results.totalSavings,
-    days,
-    systemCost,
-  });
-
-  /* Display-only ratios of the locked outputs. These never feed back into the
-   * energy allocation — they just re-present numbers already computed. */
-  const gridDrawn = results.remainingDayUsage + results.remainingNightUsage;
-  const selfSufficiency =
-    results.totalKwh > 0 ? (1 - gridDrawn / results.totalKwh) * 100 : 0;
-
-  // `newBill` is floored at zero, so once savings exceed the bill the shortfall
-  // has to be shown separately or the read-out contradicts a >100% saving.
-  const billNow = Number.isFinite(billAmount) ? billAmount : 0;
-  const credit = Math.max(0, results.totalSavings - billNow);
-
-  const fmt$ = (n) => `$${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
-  const fmt$0 = (n) => `$${Math.round(Number.isFinite(n) ? n : 0).toLocaleString()}`;
-  const fmtKwh = (n) => `${(Number.isFinite(n) ? n : 0).toFixed(0)} kWh`;
-
-  const hasBattery = batteryCapacity > 0;
+  const fmt$ = money;
+  const fmt$0 = money0;
+  const fmtKwh = kwh;
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50 font-sans text-slate-900 antialiased lg:h-screen lg:min-h-0">
@@ -177,37 +130,21 @@ export default function PylonCalculator({ onOpenClassic }) {
                 Helios
               </span>
               <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
-              <span className="text-[13px] text-slate-400">Projects</span>
+              <span className="text-[13px] text-slate-400">Quotes</span>
               <ChevronRight size={13} className="text-slate-300" />
               <h1 className="truncate text-[14px] font-semibold text-slate-900">
-                Residential — {systemSizeKw || 0} kW
-                {hasBattery ? ` + ${batteryCapacity} kWh` : ""}
+                {customerName.trim() ||
+                  tidyAddress(address) ||
+                  `Residential — ${systemSizeKw || 0} kW`}
               </h1>
               <span className="hidden items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500 md:inline-flex">
-                <MapPin size={11} /> Site estimate
+                <MapPin size={11} /> {systemSizeKw || 0} kW
+                {hasBattery ? ` + ${batteryCapacity} kWh` : " solar only"}
               </span>
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onOpenClassic}
-                className="hidden rounded-md border border-slate-300 px-2.5 py-1.5 text-[12.5px] font-medium text-slate-600 transition hover:bg-slate-50 lg:block"
-              >
-                Classic view
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-[12.5px] font-medium text-slate-600 transition hover:bg-slate-50"
-              >
-                <Share2 size={13} /> Share
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 rounded-md bg-brand-600 px-3 py-1.5 text-[12.5px] font-semibold text-white shadow-card transition hover:bg-brand-700"
-              >
-                <FileText size={13} /> Generate proposal
-              </button>
+              {modeToggle}
             </div>
           </div>
 
@@ -234,6 +171,17 @@ export default function PylonCalculator({ onOpenClassic }) {
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* ---------- left input panel ---------- */}
           <aside className="w-full shrink-0 border-b border-slate-200 bg-white lg:w-[340px] lg:overflow-y-auto lg:border-b-0 lg:border-r">
+            <SitePanel
+              customerName={customerName}
+              setCustomerName={setCustomerName}
+              address={address}
+              setAddress={setAddress}
+              siteImage={siteImage}
+              setSiteImage={setSiteImage}
+              systemSizeKw={systemSizeKw}
+              batteryCapacity={batteryCapacity}
+            />
+
             <Panel title="Proposed system" icon={Sun}>
               <InputRow
                 label="System size"
@@ -264,7 +212,7 @@ export default function PylonCalculator({ onOpenClassic }) {
               <SelectRow
                 label="Location"
                 value={region}
-                onChange={setRegionAndClear}
+                onChange={setRegion}
                 options={Object.entries(REGIONS).map(([value, r]) => ({
                   value,
                   label: r.label,
@@ -273,7 +221,7 @@ export default function PylonCalculator({ onOpenClassic }) {
               <SelectRow
                 label="Season"
                 value={season}
-                onChange={setSeasonAndClear}
+                onChange={setSeason}
                 options={SEASONS}
               />
               <InputRow

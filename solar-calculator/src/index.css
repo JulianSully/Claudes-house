@@ -18,3 +18,59 @@
     -moz-appearance: textfield;
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Print — "Download proposal" is the browser's own Save as PDF, so the
+ * printed page IS the deliverable. Strip the app chrome, drop the screen
+ * shadows and rounding that waste toner, and keep sections from splitting
+ * across a page break mid-thought.
+ * ------------------------------------------------------------------ */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  .proposal-sheet {
+    max-width: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  .proposal {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* Backgrounds carry meaning here — the dark saving panel, the green
+     "after" card — so ask the browser to keep them. */
+  .proposal * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .proposal section,
+  .proposal figure,
+  .proposal footer {
+    break-inside: avoid;
+  }
+
+  .proposal h1,
+  .proposal h2 {
+    break-after: avoid;
+  }
+
+  .proposal img {
+    max-height: 190px;
+  }
+}
