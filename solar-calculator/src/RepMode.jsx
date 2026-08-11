@@ -375,8 +375,13 @@ Sets how much of their power is used while the sun is up. Solar covers that
               {/* hero + KPIs */}
               <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr]">
                 <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-card">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.09em] text-slate-500">
-                    Estimated saving per {periodWord}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.09em] text-slate-500">
+                      Estimated saving per {periodWord}
+                    </span>
+                    <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-amber-800">
+                      Estimate only
+                    </span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-baseline gap-3">
                     <span className="font-mono text-[44px] font-semibold leading-none tracking-tight text-slate-900 tabular-nums">
@@ -720,12 +725,11 @@ Sets how much of their power is used while the sun is up. Solar covers that
               )}
 
               <p className="px-1 pb-2 text-[11.5px] leading-relaxed text-slate-400">
-                Simplified daily-average estimate for quick quoting. Yield is set from
-                location and season and the battery's round-trip loss is included; still
-                not modelled are day-to-day weather variability, inverter clipping, panel
-                degradation, tariff changes over the payback period, and the shape of the
-                load within the day. For a firm proposal, load the customer's actual
-                interval data.
+Every figure here is an estimate, not a quote or a guarantee. It runs on daily
+                averages from a flat number of sun hours, so it doesn't account for
+                seasons, weather, inverter clipping, panel degradation, tariff changes
+                over the payback period, or when in the day power actually gets used.
+                For a firm proposal, load the customer's actual interval data.
               </p>
             </div>
           </main>

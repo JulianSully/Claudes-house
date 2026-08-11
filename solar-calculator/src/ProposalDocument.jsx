@@ -76,6 +76,9 @@ export default function ProposalDocument({ proposal: p }) {
           )}
         </div>
         <div className="ml-auto shrink-0 text-right text-[11.5px] leading-relaxed text-slate-500">
+          <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-amber-800">
+            Estimate only
+          </div>
           <div>{dateLong(new Date(p.createdAt))}</div>
           <div className="font-mono">{p.id}</div>
         </div>
@@ -151,6 +154,10 @@ export default function ProposalDocument({ proposal: p }) {
               <div className="mt-1 text-[12.5px] text-slate-400">a year</div>
             </div>
           </div>
+          <p className="mt-4 border-t border-white/10 pt-3 text-[12px] leading-relaxed text-slate-400">
+            These are estimates, not a guarantee. What you actually save depends on the
+            weather, how and when you use power, and your retailer's rates.
+          </p>
         </div>
       </section>
 
