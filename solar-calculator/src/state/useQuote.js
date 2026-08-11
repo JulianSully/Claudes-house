@@ -24,6 +24,7 @@ export function useQuote() {
   const [address, setAddress] = useState("");
   const [siteImage, setSiteImage] = useState(null); // { src, kind: "upload" | "satellite" }
   const [imageAspect, setImageAspect] = useState(DEFAULT_ASPECT);
+  const [coords, setCoords] = useState(null); // { lat, lng } once an address resolves
 
   // Roof layout — panel arrays and annotations placed over the site image.
   const [arrays, setArrays] = useState([]);
@@ -137,6 +138,7 @@ export function useQuote() {
     nightPercent,
     // design
     imageAspect, setImageAspect,
+    coords, setCoords,
     arrays, setArrays,
     notes, setNotes,
     panelWatts, setPanelWatts,

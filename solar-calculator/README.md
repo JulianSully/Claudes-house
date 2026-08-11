@@ -130,17 +130,45 @@ scales into the customer's proposal and the PDF, where it renders read-only.
 What it is not: no shading study, no string design, no roof measurement, no
 panel-level production. Anything claiming those would need a real site survey.
 
+## Finding the property
+
+Type an address, pick it from the suggestions, and the aerial view drops in on
+its own. `lib/addressSearch.js` + `components/AddressSearch.jsx`.
+
+Underneath it stays a plain text input: a rep can type an address no provider
+knows — a new estate, a rural property — and the quote still works. The
+suggestions are an accelerator, never a gate. Debounced at 280 ms, in-flight
+requests aborted on the next keystroke, full keyboard support, wired as a
+combobox.
+
+**Providers** (set `VITE_MAP_KEY`, and `VITE_MAP_PROVIDER` to pick one):
+
+- **google** (default) — Places Autocomplete (New) for suggestions, then a Place
+  lookup for coordinates, then Static Maps for the image. Best Australian
+  address coverage. Enable Places API (New) + Maps Static API on the key.
+- **mapbox** — Geocoding v5 returns coordinates with the suggestion, so it needs
+  one request instead of two, then Static Images for the tile.
+
+**Without a key** the field offers a short built-in list of sample addresses
+under an amber "Sample addresses" banner. It exists so the flow can be
+demonstrated, and it never pretends to have found a real property: picking one
+fills the address and still asks for a photo. Inventing aerial imagery for a
+real street would be worse than admitting there is none.
+
+A browser-visible key is unavoidable for this. Restrict it by HTTP referrer in
+the provider's console, and don't reuse a key that has billing-heavy APIs
+enabled.
+
 ## The house image
 
 Two paths, because one of them has to work on a rep's phone in a driveway:
 
-- **Upload** — always available. Pick a photo or a screenshot; it's read as a
-  data URL so it travels with the proposal and needs no hosting.
-- **Aerial view** — needs a Google Maps key. Set `VITE_MAP_KEY` (and optionally
-  `VITE_MAP_PROVIDER`) and the button appears; without it the app just doesn't
-  offer it. A static-maps key is visible to anyone who loads the page, so
-  restrict it by HTTP referrer in the Google console and don't reuse a key with
-  billing-heavy APIs enabled.
+- **Aerial view** — automatic once an address is chosen and a key is set; the
+  image centres on the resolved coordinates rather than the address text, which
+  frames the roof far more reliably.
+- **Upload** — always available, and the only option without a key. Pick a photo
+  or a screenshot; it's read as a data URL so it travels with the proposal and
+  needs no hosting.
 
 The image is the backdrop for the design screen and the proposal. It is for
 personalisation and trust, not precision — there is no georeferencing behind it.

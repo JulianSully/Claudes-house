@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { MapPin, Upload, Home, X, Loader2 } from "lucide-react";
 
 import { Panel } from "./ui";
+import AddressSearch from "./AddressSearch";
 import {
   satelliteUrlFor,
   satelliteAvailable,
@@ -24,6 +25,8 @@ export default function SitePanel({
   siteImage,
   setSiteImage,
   setImageAspect,
+  coords,
+  setCoords,
   systemSizeKw,
   batteryCapacity,
 }) {
@@ -45,8 +48,16 @@ export default function SitePanel({
     }
   };
 
-  const onFetchSatellite = () => {
-    const url = satelliteUrlFor(address);
+  // Picking a suggestion gives us coordinates; if imagery is available, drop
+  // the roof straight on screen rather than making the rep press anything.
+  const onAddressResolved = (resolved) => {
+    if (!resolved) return;
+    setCoords?.({ lat: resolved.lat, lng: resolved.lng });
+    if (satelliteAvailable()) loadSatellite({ lat: resolved.lat, lng: resolved.lng });
+  };
+
+  const loadSatellite = ({ lat, lng } = {}) => {
+    const url = satelliteUrlFor(address, { lat, lng });
     if (!url) {
       setError("Type the address first.");
       return;
@@ -80,17 +91,7 @@ export default function SitePanel({
           />
         </label>
 
-        <label className="block">
-          <span className="mb-1 block text-[13px] text-slate-600">Address</span>
-          <input
-            type="text"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="12 Kurrajong St, Coffs Harbour NSW 2450"
-            autoComplete="street-address"
-            className="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
-          />
-        </label>
+        <AddressSearch value={address} onChange={setAddress} onResolved={onAddressResolved} />
       </div>
 
       {/* image */}
@@ -141,7 +142,7 @@ export default function SitePanel({
           {canFetch && (
             <button
               type="button"
-              onClick={onFetchSatellite}
+              onClick={() => loadSatellite(coords ?? {})}
               disabled={loading}
               className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-300 py-2 text-[12.5px] font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
             >

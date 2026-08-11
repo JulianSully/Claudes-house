@@ -52,15 +52,29 @@ export const satelliteAvailable = () => Boolean(satelliteConfig().key);
  * no key configured, no address typed, or a provider that needs coordinates
  * we don't have. Callers fall back to upload.
  */
-export function satelliteUrlFor(address, { width = 900, height = 500, zoom = 19 } = {}) {
+export function satelliteUrlFor(address, { width = 900, height = 500, zoom = 19, lat, lng } = {}) {
   const { provider, key } = satelliteConfig();
   const trimmed = (address || "").trim();
-  if (!key || !trimmed) return null;
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  if (!key || (!trimmed && !hasCoords)) return null;
 
-  const spec = PROVIDERS[provider];
-  if (!spec || provider !== "google") return null; // mapbox needs a geocode first
+  if (provider === "mapbox") {
+    // Mapbox can only centre on coordinates, so it needs the address resolved
+    // first — which the autocomplete does.
+    return hasCoords
+      ? PROVIDERS.mapbox.url({ lng, lat, key, width, height, zoom })
+      : null;
+  }
 
-  return spec.url({ address: trimmed, key, width, height, zoom });
+  // Coordinates centre the tile far more reliably than a text address, so use
+  // them whenever the address lookup gave us any.
+  return PROVIDERS.google.url({
+    address: hasCoords ? `${lat},${lng}` : trimmed,
+    key,
+    width,
+    height,
+    zoom,
+  });
 }
 
 /** Read a picked file into a data URL so it can be embedded in the proposal. */
