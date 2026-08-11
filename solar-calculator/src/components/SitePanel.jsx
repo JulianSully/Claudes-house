@@ -108,6 +108,11 @@ export default function SitePanel({
                 const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
                 if (setImageAspect && w > 0 && h > 0) setImageAspect(w / h);
               }}
+              onError={() => {
+                // The bundled sample image is optional — if it isn't there,
+                // fall back to the empty state rather than a broken frame.
+                if (siteImage.kind === "sample") setSiteImage(null);
+              }}
             />
             <figcaption className="absolute bottom-2 left-2 rounded-md bg-ink-900/85 px-2 py-1 text-[11.5px] font-semibold text-white backdrop-blur">
               {systemSizeKw || 0} kW

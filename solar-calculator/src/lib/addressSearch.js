@@ -18,6 +18,8 @@
  * the provider's console and enable only the APIs below on it.
  */
 
+import { DEFAULT_CUSTOMER } from "./defaults";
+
 const env = (name) =>
   (typeof import.meta !== "undefined" && import.meta.env?.[name]) || "";
 
@@ -32,6 +34,13 @@ export const liveSearchAvailable = () => Boolean(addressConfig().key);
  * Sample addresses — demo only, and labelled as such wherever shown.
  * ------------------------------------------------------------------ */
 const SAMPLES = [
+  // The sample property the app opens with, so re-picking it restores the
+  // coordinates the bundled aerial was captured at.
+  {
+    label: DEFAULT_CUSTOMER.address,
+    lat: DEFAULT_CUSTOMER.lat,
+    lng: DEFAULT_CUSTOMER.lng,
+  },
   "12 Kurrajong Street, Coffs Harbour NSW 2450",
   "8 Banksia Avenue, Frankston VIC 3199",
   "45 Jacaranda Drive, Springfield Lakes QLD 4300",
@@ -47,9 +56,16 @@ const SAMPLES = [
 const sampleSearch = (query) => {
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
-  return SAMPLES.filter((a) => a.toLowerCase().includes(q))
+  return SAMPLES.map((s) => (typeof s === "string" ? { label: s } : s))
+    .filter((s) => s.label.toLowerCase().includes(q))
     .slice(0, 6)
-    .map((label, i) => ({ id: `sample-${i}-${label}`, label, provider: "sample" }));
+    .map((s, i) => ({
+      id: `sample-${i}-${s.label}`,
+      label: s.label,
+      lat: s.lat ?? null,
+      lng: s.lng ?? null,
+      provider: "sample",
+    }));
 };
 
 /* ------------------------------------------------------------------ *
@@ -142,7 +158,7 @@ export async function resolveAddress(item, { signal } = {}) {
   const { provider, key } = addressConfig();
   if (!item) return null;
   if (item.provider === "sample" || !key) {
-    return { address: item.label, lat: null, lng: null };
+    return { address: item.label, lat: item.lat ?? null, lng: item.lng ?? null };
   }
   if (provider === "mapbox" || item.lat != null) {
     return { address: item.label, lat: item.lat ?? null, lng: item.lng ?? null };

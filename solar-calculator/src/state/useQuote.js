@@ -3,6 +3,11 @@ import { useMemo, useState } from "react";
 import { buildProjection, DEFAULT_PRICE_RISE } from "../lib/projection";
 import { layoutKw, panelCount, DEFAULT_PANEL_WATTS, DEFAULT_ASPECT } from "../design/layout";
 import {
+  DEFAULT_CUSTOMER,
+  DEFAULT_SITE_IMAGE,
+  DEFAULT_SITE_ASPECT,
+} from "../lib/defaults";
+import {
   useSolarResults,
   computeEconomics,
   DAYS_IN_PERIOD,
@@ -20,11 +25,18 @@ import {
  */
 export function useQuote() {
   // Site
-  const [customerName, setCustomerName] = useState("");
-  const [address, setAddress] = useState("");
-  const [siteImage, setSiteImage] = useState(null); // { src, kind: "upload" | "satellite" }
-  const [imageAspect, setImageAspect] = useState(DEFAULT_ASPECT);
-  const [coords, setCoords] = useState(null); // { lat, lng } once an address resolves
+  // Seeded with a worked example rather than a blank form — see lib/defaults.
+  const [customerName, setCustomerName] = useState(DEFAULT_CUSTOMER.name);
+  const [address, setAddress] = useState(DEFAULT_CUSTOMER.address);
+  const [siteImage, setSiteImage] = useState({
+    src: DEFAULT_SITE_IMAGE,
+    kind: "sample",
+  });
+  const [imageAspect, setImageAspect] = useState(DEFAULT_SITE_ASPECT);
+  const [coords, setCoords] = useState({
+    lat: DEFAULT_CUSTOMER.lat,
+    lng: DEFAULT_CUSTOMER.lng,
+  });
 
   // Roof layout — panel arrays and annotations placed over the site image.
   const [arrays, setArrays] = useState([]);

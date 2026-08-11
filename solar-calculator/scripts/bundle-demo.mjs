@@ -8,7 +8,7 @@
  *
  * Usage: node scripts/bundle-demo.mjs [outfile]
  */
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,8 +22,30 @@ const jsFile = files.find((f) => f.endsWith(".js"));
 if (!cssFile || !jsFile) throw new Error("run `npm run build` first");
 
 const css = readFileSync(join(distAssets, cssFile), "utf8");
+
+/**
+ * Anything Vite copied through from public/ is still referenced by URL, which a
+ * single self-contained file cannot fetch. Inline each one as a data URI.
+ */
+const MIME = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".svg": "image/svg+xml" };
+const inlinePublicAssets = (source) => {
+  const distDir = join(root, "dist");
+  let out = source;
+  for (const name of readdirSync(distDir)) {
+    const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
+    if (!MIME[ext]) continue;
+    const file = join(distDir, name);
+    if (!existsSync(file)) continue;
+    const data = `data:${MIME[ext]};base64,${readFileSync(file).toString("base64")}`;
+    out = out.split(`"/${name}"`).join(`"${data}"`).split(`'/${name}'`).join(`'${data}'`);
+  }
+  return out;
+};
 // A literal </script> inside a string in the bundle would close the tag early.
-const js = readFileSync(join(distAssets, jsFile), "utf8").replace(/<\/script/gi, "<\\/script");
+const js = inlinePublicAssets(readFileSync(join(distAssets, jsFile), "utf8")).replace(
+  /<\/script/gi,
+  "<\\/script"
+);
 
 const html = `<title>Helios — Solar + Battery Savings</title>
 <style>
