@@ -70,7 +70,7 @@ export default function RepMode({ q, modeToggle }) {
     batteryCapacity, setBatteryCapacity,
     batteryEfficiency, setBatteryEfficiency,
     systemCost, setSystemCost,
-    priceRisePercent, setPriceRisePercent,
+    priceRisePercent, setPriceRisePercent, projection,
     sunHours, setSunHours, productionFactor,
     customerName, setCustomerName,
     address, setAddress,
@@ -685,7 +685,7 @@ Sets how much of their power is used while the sun is up. Solar covers that
                 icon={Wallet}
                 subtitle={
                   systemCost > 0
-                    ? "Simple payback — no tariff inflation, no panel degradation, no discount rate."
+                    ? `Payback is simple payback at today's prices. The 10-year saving compounds at ${priceRisePercent || 0}% a year — ${(projection.savingOver(10) / (economics.annualSavings || 1)).toFixed(1)}x year one, not 10x.`
                     : "Enter the installed price above to see payback."
                 }
               >
@@ -716,18 +716,13 @@ Sets how much of their power is used while the sun is up. Solar covers that
                   </div>
                   <div>
                     <div className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
-                      10-year position
+                      Saved over 10 years
                     </div>
-                    <div
-                      className={`mt-1.5 font-mono text-[22px] font-semibold tabular-nums ${
-                        economics.tenYearNet >= 0 ? "text-emerald-700" : "text-slate-900"
-                      }`}
-                    >
-                      {economics.tenYearNet >= 0 ? "+" : "−"}
-                      {fmt$0(Math.abs(economics.tenYearNet))}
+                    <div className="mt-1.5 font-mono text-[22px] font-semibold tabular-nums text-emerald-700">
+                      {fmt$0(projection.savingOver(10))}
                     </div>
                     <div className="mt-0.5 flex items-center gap-1 text-[11.5px] text-slate-500">
-                      <TrendingUp size={11} /> savings less the install price
+                      <TrendingUp size={11} /> with power up {priceRisePercent || 0}% a year
                     </div>
                   </div>
                 </div>

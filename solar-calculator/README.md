@@ -134,6 +134,13 @@ panel). The bill rises because power costs more; the saving rises by exactly the
 same amount, because avoiding a kWh is worth whatever that kWh now costs. No
 second assumption is smuggled in.
 
+`savingOver(n)` gives the total saved over the first n years, compounding the
+annual saving at the same rate. At 5% a year, **ten years is 12.6x year one,
+not 10x** — that is the figure on the rep's Return card. It is deliberately
+uncapped, unlike the chart rows: those floor the remaining bill at zero because
+a bill cannot go negative, which would quietly clip the saving once export
+credits push the customer into credit.
+
 The projection is rebuilt from four numbers at render time rather than stored
 row by row — twenty rows of data would push a share link past what browsers
 reliably carry in a URL.

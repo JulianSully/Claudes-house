@@ -106,3 +106,54 @@ describe("the twenty-year projection", () => {
     expect(p.breakEvenYear).toBe(6);
   });
 });
+
+describe("savings over a shorter run", () => {
+  const p = buildProjection({ annualBill: 9000, annualSaving: 6492, systemCost: 39190 });
+
+  it("compounds rather than multiplying flat", () => {
+    // At 5% a year, ten years of savings is 12.578x year one, not 10x.
+    expect(p.savingOver(10)).toBeCloseTo(6492 * ((1.05 ** 10 - 1) / 0.05), 6);
+    expect(p.savingOver(10)).toBeGreaterThan(6492 * 10);
+    expect(Math.round(p.savingOver(10))).toBe(81656);
+  });
+
+  it("counts the saving alone — the system price is not netted off", () => {
+    // That is the other figure; keeping them apart is the point.
+    const tenth = p.rows[9];
+    expect(tenth.cumulativeSaving).toBeGreaterThan(tenth.cumulativeSaved);
+    expect(tenth.cumulativeSaving - tenth.cumulativeSaved).toBeCloseTo(39190, 6);
+  });
+
+  it("year one is just the annual saving", () => {
+    expect(p.savingOver(1)).toBeCloseTo(6492, 9);
+  });
+
+  it("matches the full-term figure at the last year", () => {
+    expect(p.savingOver(20)).toBeCloseTo(p.rows[19].cumulativeSaving, 9);
+  });
+
+  it("is flat multiplication when prices don't move", () => {
+    const flat = buildProjection({ annualBill: 9000, annualSaving: 6492, systemCost: 0, risePercent: 0 });
+    expect(flat.savingOver(10)).toBeCloseTo(6492 * 10, 6);
+  });
+
+  it("saves nothing over zero years", () => {
+    expect(p.savingOver(0)).toBe(0);
+    expect(p.savingOver(-5)).toBe(0);
+  });
+
+  it("answers honestly past the chart's twenty years", () => {
+    // It is a compounding formula, not a lookup into the rows, so it is not
+    // bounded by how far the charts happen to run.
+    expect(p.savingOver(25)).toBeGreaterThan(p.savingOver(20));
+    expect(p.savingOver(25)).toBeCloseTo(6492 * ((1.05 ** 25 - 1) / 0.05), 6);
+  });
+
+  it("is not clipped when the saving exceeds the bill", () => {
+    // The chart rows floor the remaining bill at zero; this must not, or a
+    // customer in credit would appear to save less than they do.
+    const inCredit = buildProjection({ annualBill: 1000, annualSaving: 2500, systemCost: 8000 });
+    expect(inCredit.savingOver(10)).toBeCloseTo(2500 * ((1.05 ** 10 - 1) / 0.05), 6);
+    expect(inCredit.savingOver(10)).toBeGreaterThan(inCredit.rows[9].cumulativeSaving);
+  });
+});
