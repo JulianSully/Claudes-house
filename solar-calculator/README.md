@@ -142,8 +142,8 @@ Two paths, because one of them has to work on a rep's phone in a driveway:
   restrict it by HTTP referrer in the Google console and don't reuse a key with
   billing-heavy APIs enabled.
 
-The image is for personalisation and trust, not precision. It carries a system
-size label and nothing else — deliberately not a panel-placement tool.
+The image is the backdrop for the design screen and the proposal. It is for
+personalisation and trust, not precision — there is no georeferencing behind it.
 
 ## The next twenty years
 

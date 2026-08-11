@@ -13,8 +13,8 @@ import {
  * Address and a picture of the house, at the top of the rep's flow.
  *
  * The point is a proposal that looks like it was made for this house, not a
- * shading study — so this stays a single image with the system size on it, and
- * never becomes a panel-placement tool.
+ * shading study. This panel only gets the image; laying panels on it happens on
+ * the Design tab.
  */
 export default function SitePanel({
   customerName,
