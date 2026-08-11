@@ -48,6 +48,42 @@ src/
   App.jsx                   mode toggle, share-link routing
 ```
 
+## When power is used, and when the sun is making it
+
+`calc/profiles.js`. This is what killed the old "From grid 0.0" — an estimate
+claiming the customer never buys a kWh again.
+
+Two things were wrong with splitting a day into "day" and "night":
+
+**Daytime demand isn't flat.** It spikes at 6–8am and again 5–9pm, and at both
+ends the sun is low or gone. So demand is spread over 24 hours using a standard
+Australian residential shape, production follows a half-sine across the daylight
+window, and self-consumption is the *overlap* — hour by hour. Solar only gets
+credit for what it actually meets.
+
+**Not every day is an average day.** One average day quietly assumes the sun
+behaves identically every day. On a bright day the extra output is exported at
+6c; on an overcast day the house buys at 32c and the battery never refills.
+Averaging first hides both, and the error only runs one way — it flatters the
+estimate. So the day is run three times (clear / mixed / overcast, 35/40/25)
+and weighted. The factors are normalised so the weighted mean is exactly 1.0:
+the yield the rep entered is preserved, only its spread across days is modelled.
+The battery is allocated *inside* that loop, because on an overcast day it
+cannot fill and that evening gets bought from the grid.
+
+**The day/night slider still governs the split**, which is what the rep wanted.
+It sets how much of the total lands in daylight hours; the shapes only decide
+how each portion is distributed within its own hours. Set it to 60% and 60% of
+the kWh still lands in daylight — it's just no longer assumed that all of it
+meets a panel that happens to be producing at that moment.
+
+Effect on the sample quote ($450/quarter, 6.6 kW, Sydney annual, no battery):
+self-sufficiency drops from 100% to **58%**, and the customer buys **5 kWh a
+day** instead of nothing.
+
+Still not modelled: interval data (there is none), inverter clipping, panel
+degradation, and time-of-use tariffs.
+
 ## How usage is established
 
 Two ways, and the order matters.
@@ -242,13 +278,8 @@ two have since been addressed:
 2. **No battery round-trip losses.** Real batteries return about 90% of what
    goes in. *Fixed:* efficiency input, default 90%, loss shown as a line in the
    breakdown.
-3. **"Day usage" treated as fully available to the array.** A 60% day split
-   includes early morning and evening when the array produces little or
-   nothing, so self-consumption — the largest single component of the saving —
-   is still the optimistic end. **Not fixed:** doing it properly means modelling
-   the load shape against a production curve rather than splitting a day in two,
-   which is a different calculation, not a tweak to this one. Flagged in the UI
-   instead.
+3. **"Day usage" treated as fully available to the array.** *Fixed:* the day is
+   now modelled hour by hour — see below.
 
 On the sample quote ($450/quarter, 6.6 kW, 16 kWh, Sydney annual) the first two
 together moved the estimate from $464 to $429 a quarter.

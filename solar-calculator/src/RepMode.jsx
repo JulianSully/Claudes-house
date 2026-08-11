@@ -364,9 +364,9 @@ export default function RepMode({ q, modeToggle }) {
               </div>
               <p className="flex items-start gap-1.5 pt-2 text-[11.5px] leading-relaxed text-slate-500">
                 <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
-                "Day" is treated as available to the array. In reality some of it falls
-                early and late when production is low, so self-consumption here is the
-                optimistic end.
+Sets how much of their power is used in daylight hours. Within those hours it's
+                spread over a typical Australian household's day — morning and evening
+                peaks included — so solar only gets credit for what it actually overlaps.
               </p>
             </Panel>
 
@@ -475,7 +475,7 @@ export default function RepMode({ q, modeToggle }) {
               <Card
                 title="Daily energy balance"
                 icon={Zap}
-                subtitle="Averages for one day — the battery takes back what last night drew out and empties again, then the day is multiplied out across the period."
+                subtitle="One average day, hour by hour, across a mix of clear, mixed and overcast weather — then multiplied out across the period. Solar only offsets what it actually overlaps."
                 right={
                   <span className="rounded-md bg-slate-100 px-2 py-1 font-mono text-[11.5px] text-slate-500">
                     × {days} days
@@ -538,8 +538,14 @@ export default function RepMode({ q, modeToggle }) {
                             color: C.solar,
                           },
                           {
+                            key: "batt",
+                            label: "From battery",
+                            value: results.dailyDayCoveredByBattery,
+                            color: C.battery,
+                          },
+                          {
                             key: "grid",
-                            label: "From grid",
+                            label: "Bought — dawn & dusk",
                             value: results.dailyRemainingDay,
                             color: C.grid,
                             textOn: C.gridInk,

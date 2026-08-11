@@ -62,6 +62,7 @@ export function useQuote() {
   const results = useSolarResults({
     supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
     knownUsageKwh: usageMode === "known" ? knownUsageKwh : 0,
+    season,
     dayPercent, systemSizeKw, productionFactor, batteryCapacity,
     batteryEfficiency, days, nightPercent,
   });

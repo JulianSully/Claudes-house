@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 
+import { allocateAverageDay } from "./profiles.js";
+
 /**
  * LOCKED CALCULATION MODULE — do not change the maths in `computeResults`.
  *
@@ -98,6 +100,7 @@ export function computeResults({
   productionFactor,
   batteryCapacity,
   batteryEfficiency = 100, // %, round trip
+  season = "annual", // sets the daylight window used for the overlap
   dayPercent,
   nightPercent,
   days,
@@ -143,31 +146,38 @@ export function computeResults({
   const dailyNightKwh = nightKwh / days;
   const dailyProduction = sizeKw * prodFactor;
 
-  const dailySelfConsumed = Math.min(dailyProduction, dailyDayKwh);
-  const dailyExcess = Math.max(0, dailyProduction - dailyDayKwh);
-  const dailyRemainingDay = Math.max(0, dailyDayKwh - dailyProduction);
-
-  // The battery starts the day part-full: it only lost whatever last night
-  // drew out of it. So the top-up it needs is the night load, not its whole
-  // capacity — a 16 kWh battery covering 10 kWh of night usage takes 10 kWh
-  // back and the remaining 6 kWh is still sitting there. The charge is
-  // therefore capped three ways: by the solar actually spare, by the physical
-  // capacity, and by the night load it has to refill for.
+  // Solar only offsets what it OVERLAPS. Daytime demand peaks at 7am and 5pm,
+  // when the sun is low or gone, so an hour-by-hour overlap is the difference
+  // between an honest estimate and one claiming the customer never buys power
+  // again. The day is also run across a mix of clear, mixed and overcast
+  // weather, because averaging the sun first hides the cloudy days on which the
+  // house buys power and the battery never fills.
   //
-  // Round-trip losses inflate that top-up: delivering L kWh after dark means
-  // storing L / efficiency, so the charge is sized on the delivered figure.
+  // The day/night slider still sets how much of the total lands in daylight
+  // hours; the shapes only decide how it is spread within them.
+  // See calc/profiles.js.
   const efficiency = Math.min(1, Math.max(0, NUMBER(batteryEfficiency) / 100));
-  const chargeNeededForNight = efficiency > 0 ? dailyNightKwh / efficiency : 0;
-  const dailyBatteryCharge = Math.min(dailyExcess, batteryKwh, chargeNeededForNight);
 
-  // Everything past that top-up is sold instead of sitting in a full battery
-  // earning nothing.
-  const dailyExported = dailyExcess - dailyBatteryCharge;
+  const day = allocateAverageDay({
+    dailyUsage: dailyDayKwh + dailyNightKwh,
+    dailyProduction,
+    dayPercent,
+    season,
+    batteryKwh,
+    efficiency,
+  });
 
-  // What comes back out is what went in, less the round-trip loss.
-  const dailyNightCovered = dailyBatteryCharge * efficiency;
-  const dailyBatteryLoss = dailyBatteryCharge - dailyNightCovered;
-  const dailyRemainingNight = Math.max(0, dailyNightKwh - dailyNightCovered);
+  const dailySelfConsumed = day.selfConsumed;
+  const dailyExcess = day.excess;
+  const dailyBatteryCharge = day.batteryCharge;
+  const dailyExported = day.exported;
+  const dailyBatteryLoss = day.batteryCharge - day.batteryDelivered;
+  const dailyNightCovered = day.nightCovered;
+  const dailyDayCoveredByBattery = day.dayCoveredByBattery;
+  const dailyRemainingNight = day.remainingNight;
+  const dailyRemainingDay = day.remainingDay;
+  const daytimeShortfall = day.daytimeShortfall;
+  const darkLoad = day.darkLoad;
 
   // Scale daily figures back up to the full billing period
   const systemProduction = dailyProduction * days;
@@ -181,7 +191,8 @@ export function computeResults({
 
   const savingsSelfConsumed = selfConsumed * usageRate;
   const savingsExport = exported * fit;
-  const savingsBattery = nightCoveredByBattery * usageRate;
+  const dayCoveredByBattery = dailyDayCoveredByBattery * days;
+  const savingsBattery = (nightCoveredByBattery + dayCoveredByBattery) * usageRate;
   const totalSavings = savingsSelfConsumed + savingsExport + savingsBattery;
 
   const newBill = Math.max(0, bill - totalSavings);
@@ -191,14 +202,16 @@ export function computeResults({
     totalKwh, dayKwh, nightKwh, systemProduction,
     usagePortion, effectiveRate, usageFromBill: !(NUMBER(knownUsageKwh) > 0),
     selfConsumed, exported, remainingDayUsage,
-    batteryCharge, nightCoveredByBattery, batteryLoss, remainingNightUsage,
+    batteryCharge, nightCoveredByBattery, dayCoveredByBattery,
+    batteryLoss, remainingNightUsage, daytimeShortfall, darkLoad,
     savingsSelfConsumed, savingsExport, savingsBattery, totalSavings,
     newBill, savingsPercent,
     // Daily-average figures, exposed for display only. These are the same
     // numbers the period totals above are derived from — never recompute
     // them by dividing a period total by anything other than `days`.
     dailyProduction, dailySelfConsumed, dailyExported, dailyBatteryCharge,
-    dailyNightCovered, dailyBatteryLoss, dailyRemainingDay, dailyRemainingNight,
+    dailyNightCovered, dailyDayCoveredByBattery, dailyBatteryLoss,
+    dailyRemainingDay, dailyRemainingNight,
     dailyDayKwh, dailyNightKwh,
   };
 }
@@ -233,6 +246,7 @@ export function useSolarResults(inputs) {
     supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
     dayPercent, systemSizeKw, productionFactor, batteryCapacity,
     batteryEfficiency = 100, days, nightPercent, knownUsageKwh,
+    season = "annual",
   } = inputs;
 
   return useMemo(
@@ -240,10 +254,10 @@ export function useSolarResults(inputs) {
       computeResults({
         billAmount, knownUsageKwh, supplyCharge, usageCharge, feedInTariff,
         systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency,
-        dayPercent, nightPercent, days,
+        season, dayPercent, nightPercent, days,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [supplyCharge, usageCharge, feedInTariff, billAmount, knownUsageKwh, billPeriod, dayPercent, systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency, days, nightPercent]
+    [supplyCharge, usageCharge, feedInTariff, billAmount, knownUsageKwh, billPeriod, dayPercent, systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency, season, days, nightPercent]
   );
 }
 
