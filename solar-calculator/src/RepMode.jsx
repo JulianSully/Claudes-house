@@ -63,6 +63,7 @@ export default function RepMode({ q, modeToggle }) {
     billAmount, setBillAmount,
     usageMode, setUsageMode,
     knownUsageKwh, setKnownUsageKwh,
+    knownUsagePerDay, setKnownUsagePerDay,
     billPeriod, setBillPeriod,
     dayPercent, setDayPercent, nightPercent,
     systemSizeKw, setSystemSizeKw,
@@ -287,9 +288,17 @@ export default function RepMode({ q, modeToggle }) {
                     label="Usage on the bill"
                     hint={`kWh for the ${periodWord}`}
                     unit="kWh"
-                    value={knownUsageKwh}
+                    value={Math.round(knownUsageKwh)}
                     onChange={setKnownUsageKwh}
                     step="10"
+                  />
+                  <InputRow
+                    label="Or per day"
+                    hint="same figure, ÷ the days"
+                    unit="kWh"
+                    value={Number(knownUsagePerDay.toFixed(1))}
+                    onChange={setKnownUsagePerDay}
+                    step="0.5"
                   />
                   <RateCheck
                     results={results}
@@ -305,7 +314,11 @@ export default function RepMode({ q, modeToggle }) {
                     {usageCharge || 0}c
                   </span>{" "}
                   = <span className="font-mono text-slate-700">{fmtKwh(results.totalKwh)}</span>{" "}
-                  over {days} days.
+                  over {days} days —{" "}
+                  <span className="font-mono font-semibold text-slate-900">
+                    {(results.totalKwh / days).toFixed(1)} kWh a day
+                  </span>
+                  .
                   <span className="mt-1.5 block text-slate-400">
                     This assumes every kWh was billed at {usageCharge || 0}c. Controlled-load
                     hot water, an off-peak block or a pay-on-time discount all make the real

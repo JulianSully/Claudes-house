@@ -47,6 +47,13 @@ export function useQuote() {
 
   const days = DAYS_IN_PERIOD[billPeriod];
   const nightPercent = 100 - dayPercent;
+
+  // A rep thinks in kWh per day ("that house is a 26 a day"), a bill prints the
+  // total for the period. Same figure, two units — so both are editable and
+  // each writes through to the other.
+  const knownUsagePerDay = days > 0 ? knownUsageKwh / days : 0;
+  const setKnownUsagePerDay = (perDay) =>
+    setKnownUsageKwh(Number.isFinite(perDay) ? perDay * days : 0);
   const periodWord = billPeriod === "monthly" ? "month" : "quarter";
   const periodShort = billPeriod === "monthly" ? "mo" : "qtr";
 
@@ -93,6 +100,7 @@ export function useQuote() {
     billAmount, setBillAmount,
     usageMode, setUsageMode,
     knownUsageKwh, setKnownUsageKwh,
+    knownUsagePerDay, setKnownUsagePerDay,
     billPeriod, setBillPeriod,
     dayPercent, setDayPercent,
     nightPercent,
