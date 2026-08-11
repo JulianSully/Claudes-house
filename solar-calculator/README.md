@@ -46,6 +46,7 @@ src/
   ProposalDocument.jsx      the customer-facing proposal, rendered from data
   components/SitePanel.jsx  address, customer name, house image
   components/EnergyDonut.jsx
+  design/panels.js          panel catalogue — brand, wattage, proportions
   design/layout.js          panel arrays + notes; panel count -> kW
   design/layout.test.js
   design/DesignCanvas.jsx   the SVG work surface (also renders read-only on the proposal)
@@ -132,9 +133,25 @@ Plus Duplicate and Undo. What is left in the side panel is only what genuinely
 belongs beside the roof rather than on it: the running kW, panel wattage, and
 the site scale.
 
-**Panel size is a property of the site, not of each array.** Every panel on a
-job is the same physical size, so scaling one array and not another would be
-drawing a lie. Set it once to match the roof in the photo.
+**Panel brands.** `design/panels.js` holds a short catalogue — Trina, Jinko,
+LONGi, Aiko, Canadian, REC, Q CELLS, Maxeon, Tindo, plus Custom. Choosing one
+sets three things at once: the wattage that drives the system size, the
+proportions the array is drawn at, and the name on the proposal. "18 × Jinko
+Tiger Neo 440 W" reads like a quote; "18 panels" reads like a guess.
+
+> The specs in that file are **indicative starting points, not datasheets**.
+> Manufacturers revise models constantly and the same model name ships at
+> several wattages, which is why wattage stays editable. Only the ratio of the
+> dimensions is used, for drawing, so a panel being 10 mm out changes nothing —
+> the wattage is the number worth checking.
+
+**Mounting orientation** is a real choice, not decoration: portrait and
+landscape fit different numbers of panels into the same roof space. Set it for
+new arrays, or with one selected to turn that array.
+
+**Panel size on the photo is a property of the site, not of each array.** Every
+panel on a job is the same physical size, so scaling one array and not another
+would be drawing a lie. Set it once to match the roof in the photo.
 
 **The layout sets the system size.** 15 panels at 440 W is a 6.6 kW system, and
 the Energy tab's size field goes read-only saying where the number came from.

@@ -13,6 +13,7 @@
  */
 
 import { tidyAddress } from "./siteImage";
+import { panelLabel } from "../design/panels";
 
 export const PROPOSAL_VERSION = 1;
 
@@ -42,6 +43,7 @@ export function buildProposal(q, { now = new Date() } = {}) {
       arrays: q.arrays ?? [],
       notes: q.notes ?? [],
       panelWidth: numeric(q.panelWidth) || undefined,
+      panelRatio: numeric(q.panelRatio) || undefined,
     },
 
     system: {
@@ -51,6 +53,7 @@ export function buildProposal(q, { now = new Date() } = {}) {
       installedPrice: numeric(q.systemCost),
       panelCount: numeric(q.placedPanels),
       panelWatts: numeric(q.panelWatts),
+      panelName: q.panelSpec ? panelLabel(q.panelSpec) : "",
       productionFactor: numeric(q.productionFactor),
     },
 

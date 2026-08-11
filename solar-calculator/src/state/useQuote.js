@@ -8,6 +8,7 @@ import {
   DEFAULT_PANEL_WIDTH,
   DEFAULT_ASPECT,
 } from "../design/layout";
+import { panelById, panelRatio, DEFAULT_PANEL_ID } from "../design/panels";
 import {
   DEFAULT_CUSTOMER,
   DEFAULT_SITE_IMAGE,
@@ -47,7 +48,15 @@ export function useQuote() {
   // Roof layout — panel arrays and annotations placed over the site image.
   const [arrays, setArrays] = useState([]);
   const [notes, setNotes] = useState([]);
-  const [panelWatts, setPanelWatts] = useState(DEFAULT_PANEL_WATTS);
+  // Choosing a panel sets the wattage and the proportions it is drawn at.
+  // Wattage stays editable: the same model ships at several outputs.
+  const [panelId, setPanelIdRaw] = useState(DEFAULT_PANEL_ID);
+  const panelSpec = panelById(panelId);
+  const [panelWatts, setPanelWatts] = useState(panelSpec.watts);
+  const setPanelId = (id) => {
+    setPanelIdRaw(id);
+    setPanelWatts(panelById(id).watts);
+  };
   // Panel size on the photo is a property of the site, not of each array —
   // every panel on a job is the same physical size.
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
@@ -164,6 +173,8 @@ export function useQuote() {
     notes, setNotes,
     panelWatts, setPanelWatts,
     panelWidth, setPanelWidth,
+    panelId, setPanelId, panelSpec,
+    panelRatio: panelRatio(panelSpec),
     placedPanels, sizeFromLayout,
     // system
     systemSizeKw, setSystemSizeKw,

@@ -22,6 +22,7 @@ import {
   normaliseAngle,
   duplicateArray,
 } from "./layout";
+import { PANELS, panelById, panelLabel, panelRatio } from "./panels";
 
 describe("arrays", () => {
   it("gives every array and note its own id", () => {
@@ -229,5 +230,56 @@ describe("canvas geometry", () => {
     expect(copy.x).toBeGreaterThan(a.x);
     expect(copy.y).toBeGreaterThan(a.y);
     expect(copy.cols).toBe(3);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Panel brands change the wattage AND the shape drawn on the roof.
+ * ------------------------------------------------------------------ */
+describe("panel brands and mounting", () => {
+  const trina = panelById("trina-vertex-s-440");
+  const qcells = panelById("qcells-ml-g11-410");
+
+  it("every catalogue entry has what the app needs", () => {
+    for (const p of PANELS) {
+      expect(p.id, p.id).toBeTruthy();
+      expect(p.watts, p.id).toBeGreaterThan(100);
+      expect(p.longMm, p.id).toBeGreaterThan(p.shortMm);
+      expect(panelLabel(p), p.id).toBeTruthy();
+    }
+    expect(new Set(PANELS.map((p) => p.id)).size).toBe(PANELS.length);
+  });
+
+  it("falls back to the first panel for an id it doesn't know", () => {
+    expect(panelById("no-such-panel")).toBe(PANELS[0]);
+  });
+
+  it("gives different brands different proportions", () => {
+    // A Q CELLS module is narrower and longer than a Trina, which changes how
+    // an array of them sits on a roof.
+    expect(panelRatio(qcells)).not.toBeCloseTo(panelRatio(trina), 3);
+    expect(panelRatio(trina)).toBeLessThan(1);
+  });
+
+  it("swaps width and height when mounted portrait", () => {
+    const spec = { panelWidth: 40, ratio: panelRatio(trina) };
+    const land = arraySize(makeArray({ x: 0, y: 0, cols: 1, rows: 1, orientation: "landscape" }), spec);
+    const port = arraySize(makeArray({ x: 0, y: 0, cols: 1, rows: 1, orientation: "portrait" }), spec);
+    expect(land.panelWidth).toBeCloseTo(port.panelHeight, 9);
+    expect(land.panelHeight).toBeCloseTo(port.panelWidth, 9);
+    expect(port.panelHeight).toBeGreaterThan(port.panelWidth); // taller than wide
+  });
+
+  it("fits a different number of panels to the same rectangle each way up", () => {
+    const spec = { panelWidth: 40, ratio: panelRatio(trina) };
+    const land = fitPanels(200, 120, { ...spec, orientation: "landscape" });
+    const port = fitPanels(200, 120, { ...spec, orientation: "portrait" });
+    expect(land).not.toEqual(port);
+    expect(port.cols).toBeGreaterThan(land.cols); // narrower panels, more across
+  });
+
+  it("still accepts a bare panel width, as it used to", () => {
+    const a = makeArray({ x: 0, y: 0, cols: 2, rows: 1 });
+    expect(arraySize(a, 40).width).toBeCloseTo(arraySize(a, { panelWidth: 40 }).width, 9);
   });
 });

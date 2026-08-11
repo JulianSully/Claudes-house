@@ -109,6 +109,7 @@ export default function ProposalDocument({ proposal: p }) {
               arrays={p.site.arrays}
               notes={p.site.notes}
               panelWidth={p.site.panelWidth}
+              panelRatio={p.site.panelRatio}
               selectedId={null}
               onSelect={() => {}}
               onChange={() => {}}
@@ -216,6 +217,11 @@ export default function ProposalDocument({ proposal: p }) {
               p.system.panelCount > 0
                 ? `${p.system.panelCount} panels — ${p.system.sizeKw.toFixed(2)} kW`
                 : `${p.system.sizeKw} kW of solar panels`
+            }
+            note={
+              p.system.panelName && p.system.panelWatts
+                ? `${p.system.panelName} · ${p.system.panelWatts} W each`
+                : null
             }
             body={`On an average day they'd make about ${Math.round(
               p.system.sizeKw * p.system.productionFactor
@@ -336,13 +342,14 @@ function OutlookFigure({ label, value, accent }) {
   );
 }
 
-function PlainCard({ icon: Icon, title, body }) {
+function PlainCard({ icon: Icon, title, body, note }) {
   return (
     <div className="rounded-xl border border-slate-200 px-4 py-3.5">
       <div className="flex items-center gap-2">
         <Icon size={15} className="shrink-0 text-brand-600" />
         <h3 className="text-[13.5px] font-semibold leading-snug">{title}</h3>
       </div>
+      {note && <p className="mt-1 text-[11.5px] font-medium text-slate-500">{note}</p>}
       <p className="mt-1.5 text-[12.5px] leading-relaxed text-slate-600">{body}</p>
     </div>
   );

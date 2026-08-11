@@ -30,7 +30,7 @@ export const viewBoxHeight = (aspect) =>
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${Date.now().toString(36)}-${(seq += 1)}`;
 
-export function makeArray({ x, y, cols = 4, rows = 2, rotation = 0 }) {
+export function makeArray({ x, y, cols = 4, rows = 2, rotation = 0, orientation = "landscape" }) {
   return {
     id: nextId("arr"),
     kind: "array",
@@ -39,6 +39,7 @@ export function makeArray({ x, y, cols = 4, rows = 2, rotation = 0 }) {
     cols: clampCount(cols),
     rows: clampCount(rows),
     rotation,
+    orientation,
   };
 }
 
@@ -62,9 +63,17 @@ const clampCount = (n) => Math.max(1, Math.min(40, Math.round(Number(n) || 1)));
  * job is the same physical size, so scaling one array and not another would be
  * drawing a lie. It is passed in rather than stored per array.
  */
-export function arraySize(a, panelWidth = DEFAULT_PANEL_WIDTH) {
-  const pw = a.panelWidth ?? panelWidth; // tolerate layouts saved before the move
-  const ph = pw * PANEL_ASPECT;
+export function arraySize(a, spec = {}) {
+  // Tolerates being handed a plain number, which is all it used to take.
+  const s = typeof spec === "number" ? { panelWidth: spec } : spec;
+  const longSide = s.panelWidth ?? a.panelWidth ?? DEFAULT_PANEL_WIDTH;
+  const ratio = s.ratio ?? PANEL_ASPECT;
+
+  // The long edge runs across in landscape and down in portrait.
+  const portrait = (a.orientation ?? s.orientation ?? "landscape") === "portrait";
+  const pw = portrait ? longSide * ratio : longSide;
+  const ph = portrait ? longSide : longSide * ratio;
+
   return {
     panelWidth: pw,
     panelHeight: ph,
@@ -85,9 +94,9 @@ export const layoutKw = (arrays, watts = DEFAULT_PANEL_WATTS) =>
  * roof runs to the edge of the frame, so panels are allowed to overhang; this
  * only stops one being dragged completely out of sight.
  */
-export function keepOnCanvas(a, aspect, panelWidth) {
+export function keepOnCanvas(a, aspect, spec) {
   const h = viewBoxHeight(aspect);
-  const { width, height } = arraySize(a, panelWidth);
+  const { width, height } = arraySize(a, spec);
   return {
     ...a,
     x: Math.max(-width * 0.5, Math.min(VIEWBOX_WIDTH - width * 0.5, a.x)),
@@ -127,8 +136,8 @@ const rotatePoint = (px, py, radians) => ({
 });
 
 /** Where a point in the array's own unrotated space lands on the canvas. */
-export function toWorld(a, panelWidth, localX, localY) {
-  const { width, height } = arraySize(a, panelWidth);
+export function toWorld(a, spec, localX, localY) {
+  const { width, height } = arraySize(a, spec);
   const rad = (a.rotation * Math.PI) / 180;
   const centre = { x: a.x + width / 2, y: a.y + height / 2 };
   const d = rotatePoint(localX - width / 2, localY - height / 2, rad);
@@ -136,8 +145,8 @@ export function toWorld(a, panelWidth, localX, localY) {
 }
 
 /** The inverse: a canvas point expressed in the array's own space. */
-export function toLocal(a, panelWidth, worldX, worldY) {
-  const { width, height } = arraySize(a, panelWidth);
+export function toLocal(a, spec, worldX, worldY) {
+  const { width, height } = arraySize(a, spec);
   const rad = (-a.rotation * Math.PI) / 180;
   const centre = { x: a.x + width / 2, y: a.y + height / 2 };
   const d = rotatePoint(worldX - centre.x, worldY - centre.y, rad);
@@ -148,9 +157,13 @@ export function toLocal(a, panelWidth, worldX, worldY) {
  * How many whole panels fit in a dragged rectangle. At least one either way —
  * a stray click should still leave a panel behind rather than nothing.
  */
-export function fitPanels(width, height, panelWidth) {
-  const pw = panelWidth;
-  const ph = pw * PANEL_ASPECT;
+export function fitPanels(width, height, spec = {}) {
+  const s = typeof spec === "number" ? { panelWidth: spec } : spec;
+  const longSide = s.panelWidth ?? DEFAULT_PANEL_WIDTH;
+  const ratio = s.ratio ?? PANEL_ASPECT;
+  const portrait = (s.orientation ?? "landscape") === "portrait";
+  const pw = portrait ? longSide * ratio : longSide;
+  const ph = portrait ? longSide : longSide * ratio;
   return {
     cols: clampCount(Math.max(1, Math.round((Math.abs(width) + PANEL_GAP) / (pw + PANEL_GAP)))),
     rows: clampCount(Math.max(1, Math.round((Math.abs(height) + PANEL_GAP) / (ph + PANEL_GAP)))),
@@ -162,20 +175,20 @@ export function fitPanels(width, height, panelWidth) {
  * Without this the shape drifts under the cursor whenever it is rotated,
  * because the rotation pivot is the centre and the centre moves as it grows.
  */
-export function resizeFromCorner(a, panelWidth, localX, localY) {
-  const anchor = toWorld(a, panelWidth, 0, 0);
-  const { cols, rows } = fitPanels(localX, localY, panelWidth);
+export function resizeFromCorner(a, spec, localX, localY) {
+  const anchor = toWorld(a, spec, 0, 0);
+  const { cols, rows } = fitPanels(localX, localY, { ...spec, orientation: a.orientation });
   const next = { ...a, cols, rows };
 
-  const { width, height } = arraySize(next, panelWidth);
+  const { width, height } = arraySize(next, spec);
   const rad = (next.rotation * Math.PI) / 180;
   const d = rotatePoint(-width / 2, -height / 2, rad);
   return { ...next, x: anchor.x - width / 2 - d.x, y: anchor.y - height / 2 - d.y };
 }
 
 /** Angle from an array's centre to a point, as a compass-style rotation. */
-export function angleTo(a, panelWidth, worldX, worldY) {
-  const { width, height } = arraySize(a, panelWidth);
+export function angleTo(a, spec, worldX, worldY) {
+  const { width, height } = arraySize(a, spec);
   const centre = { x: a.x + width / 2, y: a.y + height / 2 };
   const deg = (Math.atan2(worldY - centre.y, worldX - centre.x) * 180) / Math.PI;
   return deg + 90; // handle sits above the shape, so straight up is zero

@@ -20,7 +20,8 @@ import {
   duplicateArray,
   DEFAULT_PANEL_WIDTH,
 } from "./layout";
-import { Panel, InputRow } from "../components/ui";
+import { PANELS, panelLabel, ORIENTATIONS } from "./panels";
+import { Panel, InputRow, SelectRow, Segmented } from "../components/ui";
 import { kw } from "../lib/format";
 
 /**
@@ -38,8 +39,13 @@ export default function DesignStage({ q }) {
     notes, setNotes,
     panelWatts, setPanelWatts,
     panelWidth, setPanelWidth,
+    panelId, setPanelId, panelSpec, panelRatio,
     systemSizeKw,
   } = q;
+
+  // New arrays take this orientation; changing it with one selected turns that
+  // array too, which is what "portrait" means when you are looking at one.
+  const [orientation, setOrientationRaw] = useState("landscape");
 
   const [selectedId, setSelectedId] = useState(null);
   const history = useRef([]);
@@ -57,17 +63,29 @@ export default function DesignStage({ q }) {
   };
 
   const selected = arrays.find((a) => a.id === selectedId) ?? null;
+
+  const setOrientation = (value) => {
+    setOrientationRaw(value);
+    if (selectedId && arrays.some((a) => a.id === selectedId)) {
+      remember();
+      setArrays(updateItem(arrays, selectedId, { orientation: value }));
+    }
+  };
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
 
   const createArray = (array) => {
     remember();
-    setArrays([...arrays, keepOnCanvas(array, imageAspect, panelWidth)]);
+    setArrays([...arrays, keepOnCanvas(array, imageAspect, { panelWidth, ratio: panelRatio })]);
     setSelectedId(array.id);
   };
 
   const changeItem = (id, patch) => {
     if (arrays.some((a) => a.id === id)) {
-      setArrays(updateItem(arrays, id, patch).map((a) => keepOnCanvas(a, imageAspect, panelWidth)));
+      setArrays(
+        updateItem(arrays, id, patch).map((a) =>
+          keepOnCanvas(a, imageAspect, { panelWidth, ratio: panelRatio })
+        )
+      );
     } else {
       setNotes(updateItem(notes, id, patch));
     }
@@ -131,13 +149,25 @@ export default function DesignStage({ q }) {
                 : `Nothing placed yet, so the quote uses the ${kw(systemSizeKw)} on the Energy tab.`}
             </p>
           </div>
+          <SelectRow
+            label="Panel"
+            value={panelId}
+            onChange={setPanelId}
+            options={PANELS.map((p) => ({ value: p.id, label: panelLabel(p) }))}
+          />
           <InputRow
-            label="Panel wattage"
-            hint="per panel"
+            label="Wattage"
+            hint="check the datasheet"
             unit="W"
             value={panelWatts}
             onChange={setPanelWatts}
             step="5"
+          />
+          <Segmented
+            label="Mounted"
+            value={orientation}
+            onChange={setOrientation}
+            options={ORIENTATIONS}
           />
         </Panel>
 
@@ -263,6 +293,8 @@ export default function DesignStage({ q }) {
             arrays={arrays}
             notes={notes}
             panelWidth={panelWidth}
+            panelRatio={panelRatio}
+            orientation={orientation}
             selectedId={selectedId}
             onSelect={setSelectedId}
             onChange={changeItem}

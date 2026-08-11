@@ -42,6 +42,8 @@ export default function DesignCanvas({
   arrays,
   notes,
   panelWidth = DEFAULT_PANEL_WIDTH,
+  panelRatio,
+  orientation = "landscape",
   selectedId,
   onSelect,
   onChange, // (id, patch)
@@ -54,6 +56,12 @@ export default function DesignCanvas({
   const [, forceRender] = useState(0);
   const [draft, setDraft] = useState(null); // rectangle being dragged out
   const [spaceHeld, setSpaceHeld] = useState(false);
+
+  // One object describing how a panel is drawn, passed to every geometry call.
+  const spec = useMemo(
+    () => ({ panelWidth, ratio: panelRatio, orientation }),
+    [panelWidth, panelRatio, orientation]
+  );
 
   const worldHeight = viewBoxHeight(aspect);
   const fullView = useMemo(
@@ -91,12 +99,12 @@ export default function DesignCanvas({
         return;
       }
       if (g.type === "resize") {
-        const local = toLocal(g.item, panelWidth, p.x, p.y);
-        onChange(g.id, resizeFromCorner(g.item, panelWidth, local.x, local.y));
+        const local = toLocal(g.item, spec, p.x, p.y);
+        onChange(g.id, resizeFromCorner(g.item, spec, local.x, local.y));
         return;
       }
       if (g.type === "rotate") {
-        const raw = angleTo(g.item, panelWidth, p.x, p.y);
+        const raw = angleTo(g.item, spec, p.x, p.y);
         const snapped = e.shiftKey ? Math.round(raw / 15) * 15 : Math.round(raw);
         onChange(g.id, { rotation: normaliseAngle(snapped) });
       }
@@ -118,12 +126,13 @@ export default function DesignCanvas({
           onSelect(null);
           return;
         }
-        const { cols, rows } = fitPanels(w, h, panelWidth);
+        const { cols, rows } = fitPanels(w, h, spec);
         const created = makeArray({
           x: Math.min(g.start.x, p.x),
           y: Math.min(g.start.y, p.y),
           cols,
           rows,
+          orientation: spec.orientation,
         });
         onCreate(created);
         return;
@@ -140,7 +149,7 @@ export default function DesignCanvas({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
     };
-  }, [onChange, onCreate, onSelect, panelWidth, readOnly]);
+  }, [onChange, onCreate, onSelect, spec, readOnly]);
 
   /* ---------------- keyboard ---------------- */
 
@@ -286,7 +295,7 @@ export default function DesignCanvas({
           <PanelArray
             key={a.id}
             array={a}
-            panelWidth={panelWidth}
+            spec={spec}
             selected={a.id === selectedId}
             readOnly={readOnly}
             onPointerDown={(e) => startMove(e, a)}
@@ -304,12 +313,12 @@ export default function DesignCanvas({
           />
         ))}
 
-        {draft && <DraftRect draft={draft} panelWidth={panelWidth} scale={scale} />}
+        {draft && <DraftRect draft={draft} spec={spec} scale={scale} />}
 
         {selected && !readOnly && (
           <Handles
             array={selected}
-            panelWidth={panelWidth}
+            spec={spec}
             scale={scale}
             onResize={(e) => startHandle(e, "resize")}
             onRotate={(e) => startHandle(e, "rotate")}
@@ -352,8 +361,8 @@ function ZoomButton({ children, label, onClick }) {
   );
 }
 
-function PanelArray({ array: a, panelWidth, selected, readOnly, onPointerDown }) {
-  const { panelWidth: pw, panelHeight: ph, width, height } = arraySize(a, panelWidth);
+function PanelArray({ array: a, spec, selected, readOnly, onPointerDown }) {
+  const { panelWidth: pw, panelHeight: ph, width, height } = arraySize(a, spec);
 
   const panels = [];
   for (let r = 0; r < a.rows; r += 1) {
@@ -400,13 +409,13 @@ function PanelArray({ array: a, panelWidth, selected, readOnly, onPointerDown })
 }
 
 /** Corner and rotate grips, sized in screen terms so they stay grabbable at any zoom. */
-function Handles({ array: a, panelWidth, scale, onResize, onRotate }) {
-  const { width, height } = arraySize(a, panelWidth);
+function Handles({ array: a, spec, scale, onResize, onRotate }) {
+  const { width, height } = arraySize(a, spec);
   const r = 6 * scale;
-  const corner = toWorld(a, panelWidth, width, height);
+  const corner = toWorld(a, spec, width, height);
   const stem = 26 * scale;
-  const knob = toWorld(a, panelWidth, width / 2, -stem);
-  const top = toWorld(a, panelWidth, width / 2, 0);
+  const knob = toWorld(a, spec, width / 2, -stem);
+  const top = toWorld(a, spec, width / 2, 0);
 
   return (
     <g>
@@ -438,13 +447,13 @@ function Handles({ array: a, panelWidth, scale, onResize, onRotate }) {
 }
 
 /** Live preview while dragging out a new array, with the panel count on it. */
-function DraftRect({ draft, panelWidth, scale }) {
+function DraftRect({ draft, spec, scale }) {
   const x = Math.min(draft.x0, draft.x1);
   const y = Math.min(draft.y0, draft.y1);
   const w = Math.abs(draft.x1 - draft.x0);
   const h = Math.abs(draft.y1 - draft.y0);
   if (w < 4 && h < 4) return null;
-  const { cols, rows } = fitPanels(w, h, panelWidth);
+  const { cols, rows } = fitPanels(w, h, spec);
 
   return (
     <g pointerEvents="none">
