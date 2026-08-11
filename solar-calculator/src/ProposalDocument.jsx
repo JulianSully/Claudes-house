@@ -156,7 +156,7 @@ export default function ProposalDocument({ proposal: p }) {
           </div>
           <p className="mt-4 border-t border-white/10 pt-3 text-[12px] leading-relaxed text-slate-400">
             These are estimates, not a guarantee. What you actually save depends on the
-            weather, how and when you use power, and your retailer's rates.
+            weather and on how and when you use power.
           </p>
         </div>
       </section>
