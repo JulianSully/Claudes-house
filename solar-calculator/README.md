@@ -38,12 +38,15 @@ src/
   lib/format.js             AUD and en-AU formatting — all of it, in one place
   lib/proposal.js           buildProposal() → plain data; share-link encoding
   lib/proposal.test.js
+  lib/projection.js         20 years of bills with and without the system
+  lib/projection.test.js
   lib/siteImage.js          upload + satellite providers, address tidying
   RepMode.jsx               the rep's input screen
   CustomerMode.jsx          presentation wrapper — document + export actions
   ProposalDocument.jsx      the customer-facing proposal, rendered from data
   components/SitePanel.jsx  address, customer name, house image
   components/EnergyDonut.jsx
+  components/ProjectionCharts.jsx
   components/ui.jsx         panels, property rows, stat tiles, allocation bars
   App.jsx                   mode toggle, share-link routing
 ```
@@ -114,6 +117,31 @@ Two paths, because one of them has to work on a rep's phone in a driveway:
 
 The image is for personalisation and trust, not precision. It carries a system
 size label and nothing else — deliberately not a panel-placement tool.
+
+## The next twenty years
+
+The most persuasive thing on a solar proposal is not this quarter's saving —
+it is the gap that opens up once power prices keep climbing. `lib/projection.js`
+builds both sides of that comparison and the customer screen draws two charts
+from it.
+
+- **What you'd pay each year** — grouped bars, the bill with and without solar.
+- **What it adds up to** — running totals, with the system price charged to the
+  solar side up front. The crossover is marked: the year it has paid for itself.
+
+Everything compounds at one rate (default **5% a year**, editable in the rep's
+panel). The bill rises because power costs more; the saving rises by exactly the
+same amount, because avoiding a kWh is worth whatever that kWh now costs. No
+second assumption is smuggled in.
+
+The projection is rebuilt from four numbers at render time rather than stored
+row by row — twenty rows of data would push a share link past what browsers
+reliably carry in a URL.
+
+Both charts are plain inline SVG: no chart library, and they print into the PDF
+as vectors. Rose for money handed to the retailer, emerald for money kept —
+checked for colour-blind separation, and every series carries a legend so
+neither chart is read by colour alone.
 
 ## The proposal, and getting it out
 

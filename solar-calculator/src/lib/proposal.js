@@ -89,6 +89,16 @@ export function buildProposal(q, { now = new Date() } = {}) {
       tenYearNet: q.economics.tenYearNet,
     },
 
+    // The 20-year charts are rebuilt from these four numbers rather than
+    // stored row by row — 20 rows of data would push a share link past what
+    // browsers reliably carry in a URL.
+    outlook: {
+      annualBill: numeric(q.annualBill),
+      annualSaving: numeric(q.economics.annualSavings),
+      systemCost: numeric(q.systemCost),
+      priceRisePercent: numeric(q.priceRisePercent),
+    },
+
     // Stated on the proposal so the customer sees what it rests on.
     assumptions: {
       productionBasis: `${numeric(q.productionFactor)} hours of good sun a day`,

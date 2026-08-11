@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { buildProjection, DEFAULT_PRICE_RISE } from "../lib/projection";
 import {
   useSolarResults,
   computeEconomics,
@@ -40,6 +41,7 @@ export function useQuote() {
   const [batteryCapacity, setBatteryCapacity] = useState(0); // kWh, 0 = solar only
   const [batteryEfficiency, setBatteryEfficiency] = useState(DEFAULT_BATTERY_EFFICIENCY);
   const [systemCost, setSystemCost] = useState(6500); // $ net of STCs
+  const [priceRisePercent, setPriceRisePercent] = useState(DEFAULT_PRICE_RISE);
 
   // Yield — a flat number of peak sun hours a day. 6.6 kW x 5 = 33 kWh/day.
   const [sunHours, setSunHours] = useState(SUN_HOURS_PER_DAY);
@@ -67,6 +69,20 @@ export function useQuote() {
   const economics = useMemo(
     () => computeEconomics({ totalSavings: results.totalSavings, days, systemCost }),
     [results.totalSavings, days, systemCost]
+  );
+
+  // Twenty years of bills either way. Consumes the annual figures, never feeds
+  // back into the energy allocation.
+  const annualBill = days > 0 ? ((Number.isFinite(billAmount) ? billAmount : 0) / days) * 365 : 0;
+  const projection = useMemo(
+    () =>
+      buildProjection({
+        annualBill,
+        annualSaving: economics.annualSavings,
+        systemCost,
+        risePercent: priceRisePercent,
+      }),
+    [annualBill, economics.annualSavings, systemCost, priceRisePercent]
   );
 
   /* Presentation-only ratios of the locked outputs. None of these feed back
@@ -109,6 +125,8 @@ export function useQuote() {
     batteryCapacity, setBatteryCapacity,
     batteryEfficiency, setBatteryEfficiency,
     systemCost, setSystemCost,
+    priceRisePercent, setPriceRisePercent,
+    annualBill, projection,
     // yield
     sunHours, setSunHours,
     productionFactor,

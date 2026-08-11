@@ -1,6 +1,8 @@
-import { Sun, BatteryCharging, Home, Check } from "lucide-react";
+import { Sun, BatteryCharging, Home, Check, TrendingUp } from "lucide-react";
 
 import EnergyDonut from "./components/EnergyDonut";
+import { AnnualBillChart, CumulativeChart } from "./components/ProjectionCharts";
+import { buildProjection } from "./lib/projection";
 import { money, money0, kwh, dateLong, years } from "./lib/format";
 
 /**
@@ -24,6 +26,15 @@ export default function ProposalDocument({ proposal: p }) {
   const e = p.estimate;
   const period = p.billing.periodWord;
   const hasBattery = p.system.batteryKwh > 0;
+
+  const outlook = p.outlook ?? {};
+  const projection = buildProjection({
+    annualBill: outlook.annualBill,
+    annualSaving: outlook.annualSaving,
+    systemCost: outlook.systemCost,
+    risePercent: outlook.priceRisePercent,
+  });
+  const showOutlook = projection.totalWithout > 0;
 
   const segments = [
     {
@@ -212,13 +223,61 @@ export default function ProposalDocument({ proposal: p }) {
               title={`Pays for itself in ${years(e.paybackYears)}`}
               body={`At ${money0(p.system.installedPrice)} installed, and saving ${money0(
                 e.annualSaving
-              )} a year. After ten years you'd be about ${money0(
-                Math.abs(e.tenYearNet)
-              )} ${e.tenYearNet >= 0 ? "ahead" : "short"}.`}
+              )} a year at today's prices.`}
             />
           )}
         </div>
       </section>
+
+      {/* ---------- the next twenty years ---------- */}
+      {showOutlook && (
+        <section className="px-7 pt-8">
+          <h2 className="text-[15px] font-semibold tracking-[-0.01em]">
+            The next {projection.years} years
+          </h2>
+          <p className="mt-1 max-w-[62ch] text-[13px] leading-relaxed text-slate-600">
+            Power prices don't stand still. These assume they rise{" "}
+            <strong className="font-semibold text-slate-800">
+              {projection.risePercent}% a year
+            </strong>
+            , which is the part of the bill solar protects you from.
+          </p>
+
+          <div className="mt-5 rounded-xl border border-slate-200 px-5 py-5">
+            <h3 className="text-[13.5px] font-semibold">What you'd pay each year</h3>
+            <p className="mb-4 mt-0.5 text-[12px] text-slate-500">
+              By year {projection.years} the bill without solar reaches{" "}
+              {money0(projection.finalYearBill)}.
+            </p>
+            <AnnualBillChart projection={projection} />
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-200 px-5 py-5">
+            <h3 className="text-[13.5px] font-semibold">What it adds up to</h3>
+            <p className="mb-4 mt-0.5 text-[12px] text-slate-500">
+              Running totals — the solar line includes the{" "}
+              {money0(projection.systemCost)} for the system.
+            </p>
+            <CumulativeChart projection={projection} />
+
+            <div className="mt-5 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-3">
+              <OutlookFigure
+                label={`Power over ${projection.years} years, no solar`}
+                value={money0(projection.totalWithout)}
+              />
+              <OutlookFigure
+                label="With solar, system included"
+                value={money0(projection.totalWith)}
+              />
+              <OutlookFigure
+                label={`You'd be ahead by`}
+                value={money0(projection.totalSaved)}
+                accent
+              />
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ---------- the fine print, in plain words ---------- */}
       <footer className="mt-8 border-t border-slate-200 px-7 pb-8 pt-5">
@@ -232,6 +291,24 @@ export default function ProposalDocument({ proposal: p }) {
         </p>
       </footer>
     </article>
+  );
+}
+
+function OutlookFigure({ label, value, accent }) {
+  return (
+    <div>
+      <div className="text-[11px] font-medium uppercase tracking-[0.07em] text-slate-500">
+        {label}
+      </div>
+      <div
+        className={`mt-1 font-mono text-[20px] font-semibold tabular-nums ${
+          accent ? "text-emerald-700" : "text-slate-900"
+        }`}
+      >
+        {accent && <TrendingUp size={15} className="mr-1 inline align-[-2px]" />}
+        {value}
+      </div>
+    </div>
   );
 }
 

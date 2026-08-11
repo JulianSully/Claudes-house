@@ -70,6 +70,7 @@ export default function RepMode({ q, modeToggle }) {
     batteryCapacity, setBatteryCapacity,
     batteryEfficiency, setBatteryEfficiency,
     systemCost, setSystemCost,
+    priceRisePercent, setPriceRisePercent,
     sunHours, setSunHours, productionFactor,
     customerName, setCustomerName,
     address, setAddress,
@@ -207,6 +208,14 @@ export default function RepMode({ q, modeToggle }) {
                 value={systemCost}
                 onChange={setSystemCost}
                 step="100"
+              />
+              <InputRow
+                label="Power price rise"
+                hint="a year, for the 20-year charts"
+                unit="%"
+                value={priceRisePercent}
+                onChange={setPriceRisePercent}
+                step="0.5"
               />
             </Panel>
 
