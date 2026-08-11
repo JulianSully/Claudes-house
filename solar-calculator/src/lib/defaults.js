@@ -27,10 +27,10 @@ export const DEFAULT_CUSTOMER = {
  * DEFAULT_CUSTOMER above. The demo bundler inlines whatever is here as a data
  * URI so the single-file build stays self-contained.
  */
-export const DEFAULT_SITE_IMAGE = `${import.meta.env?.BASE_URL ?? "/"}site-default.jpg`.replace(
-  "//",
-  "/"
-);
+// BASE_URL always ends in a slash, so this needs no tidying up afterwards.
+// It must not: the demo bundler rewrites this path to an inlined data URI, and
+// base64 is full of "//" — a blind slash-collapse would corrupt the image.
+export const DEFAULT_SITE_IMAGE = `${import.meta.env?.BASE_URL ?? "/"}site-default.jpg`;
 
 /** Aspect ratio of the bundled image, so the design canvas is right on load. */
-export const DEFAULT_SITE_ASPECT = 1712 / 1080;
+export const DEFAULT_SITE_ASPECT = 1720 / 1074;
