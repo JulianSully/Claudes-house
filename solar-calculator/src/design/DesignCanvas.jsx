@@ -26,7 +26,7 @@ import {
  *   drag an array .............. move it
  *   drag the corner handle ..... add or remove panels
  *   drag the top handle ........ rotate (hold Shift to snap to 15°)
- *   wheel ...................... zoom about the cursor
+ *   pinch on a trackpad ........ zoom about the cursor (+ and − also zoom)
  *   middle-drag or space-drag .. pan
  *   arrows ..................... nudge, Shift for a bigger step
  *   Delete / Backspace ......... remove
@@ -219,13 +219,25 @@ export default function DesignCanvas({
 
   /* ---------------- zoom ---------------- */
 
+  /**
+   * A plain scroll belongs to the PAGE, not the canvas. Scrolling used to zoom,
+   * which meant reading down the screen past the roof zoomed it instead —
+   * annoying on a mouse and infuriating on a trackpad, where two fingers is
+   * just how you scroll.
+   *
+   * Pinch still zooms: browsers deliver a trackpad pinch as a wheel event with
+   * ctrlKey set, which is the one case worth intercepting. Everything else goes
+   * to the + and − buttons.
+   */
   const onWheel = useCallback(
     (e) => {
-      if (readOnly) return;
+      if (readOnly || !e.ctrlKey) return; // no preventDefault: let the page scroll
       e.preventDefault();
       const p = pointerToViewBox(svgRef.current, e);
       setView((v) => {
-        const factor = e.deltaY > 0 ? 1.12 : 1 / 1.12;
+        // Pinch arrives as a stream of small deltas and a wheel notch as one
+        // big one, so the step follows the delta rather than being fixed.
+        const factor = Math.min(1.25, Math.max(0.8, Math.exp(e.deltaY * 0.0035)));
         const w = Math.min(VIEWBOX_WIDTH * 1.5, Math.max(VIEWBOX_WIDTH * 0.12, v.w * factor));
         const h = w * (v.h / v.w);
         // Keep whatever is under the cursor exactly where it is.

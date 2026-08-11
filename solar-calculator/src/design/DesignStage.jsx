@@ -352,7 +352,10 @@ export default function DesignStage({ q }) {
                   knob to rotate
                 </>
               ) : (
-                <>Drag anywhere on the roof to lay panels. Scroll to zoom, alt-drag to pan.</>
+                <>
+                  Drag anywhere on the roof to lay panels. Pinch or use + and − to zoom,
+                  alt-drag to pan.
+                </>
               )}
             </p>
             {selected && !calibrating && (
