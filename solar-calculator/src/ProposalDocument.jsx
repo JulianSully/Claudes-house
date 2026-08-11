@@ -1,6 +1,7 @@
 import { Sun, BatteryCharging, Home, Check, TrendingUp } from "lucide-react";
 
 import EnergyDonut from "./components/EnergyDonut";
+import DesignCanvas from "./design/DesignCanvas";
 import { AnnualBillChart, CumulativeChart } from "./components/ProjectionCharts";
 import { buildProjection } from "./lib/projection";
 import { money, money0, kwh, dateLong, years } from "./lib/format";
@@ -26,6 +27,7 @@ export default function ProposalDocument({ proposal: p }) {
   const e = p.estimate;
   const period = p.billing.periodWord;
   const hasBattery = p.system.batteryKwh > 0;
+  const hasLayout = (p.site.arrays?.length ?? 0) > 0 || (p.site.notes?.length ?? 0) > 0;
 
   const outlook = p.outlook ?? {};
   const projection = buildProjection({
@@ -95,18 +97,37 @@ export default function ProposalDocument({ proposal: p }) {
         </div>
       </header>
 
-      {/* ---------- the house ---------- */}
+      {/* ---------- the house, with the panels on it ---------- */}
       {p.site.imageSrc && (
-        <figure className="relative mx-7 mt-6 overflow-hidden rounded-xl border border-slate-200">
-          <img
-            src={p.site.imageSrc}
-            alt={`The property at ${p.customer.address || "this address"}`}
-            className="block h-[230px] w-full object-cover"
-          />
+        <figure className="relative mx-7 mt-6">
+          {hasLayout ? (
+            // The whole point of the design screen: the customer sees panels on
+            // their own roof, laid out exactly as the rep placed them.
+            <DesignCanvas
+              imageSrc={p.site.imageSrc}
+              aspect={p.site.imageAspect}
+              arrays={p.site.arrays}
+              notes={p.site.notes}
+              selectedId={null}
+              onSelect={() => {}}
+              onChange={() => {}}
+              tool="select"
+              onCanvasClick={() => {}}
+              readOnly
+            />
+          ) : (
+            <img
+              src={p.site.imageSrc}
+              alt={`The property at ${p.customer.address || "this address"}`}
+              className="block h-[230px] w-full rounded-xl border border-slate-200 object-cover"
+            />
+          )}
           <figcaption className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg bg-ink-900/85 px-3 py-2 text-white backdrop-blur">
             <Sun size={14} className="text-amber-300" />
             <span className="text-[13px] font-semibold">
-              {p.system.sizeKw} kW of panels
+              {p.system.panelCount > 0
+                ? `${p.system.panelCount} panels · ${p.system.sizeKw.toFixed(2)} kW`
+                : `${p.system.sizeKw} kW of panels`}
               {hasBattery ? ` + ${p.system.batteryKwh} kWh battery` : ""}
             </span>
           </figcaption>
@@ -192,7 +213,11 @@ export default function ProposalDocument({ proposal: p }) {
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <PlainCard
             icon={Sun}
-            title={`${p.system.sizeKw} kW of solar panels`}
+            title={
+              p.system.panelCount > 0
+                ? `${p.system.panelCount} panels — ${p.system.sizeKw.toFixed(2)} kW`
+                : `${p.system.sizeKw} kW of solar panels`
+            }
             body={`On an average day they'd make about ${Math.round(
               p.system.sizeKw * p.system.productionFactor
             )} kWh — roughly what your home uses in a day.`}

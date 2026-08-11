@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { buildProjection, DEFAULT_PRICE_RISE } from "../lib/projection";
+import { layoutKw, panelCount, DEFAULT_PANEL_WATTS, DEFAULT_ASPECT } from "../design/layout";
 import {
   useSolarResults,
   computeEconomics,
@@ -22,6 +23,12 @@ export function useQuote() {
   const [customerName, setCustomerName] = useState("");
   const [address, setAddress] = useState("");
   const [siteImage, setSiteImage] = useState(null); // { src, kind: "upload" | "satellite" }
+  const [imageAspect, setImageAspect] = useState(DEFAULT_ASPECT);
+
+  // Roof layout — panel arrays and annotations placed over the site image.
+  const [arrays, setArrays] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [panelWatts, setPanelWatts] = useState(DEFAULT_PANEL_WATTS);
 
   // Tariff
   const [supplyCharge, setSupplyCharge] = useState(1.1); // $/day
@@ -37,7 +44,15 @@ export function useQuote() {
   const [dayPercent, setDayPercent] = useState(60);
 
   // Proposed system
-  const [systemSizeKw, setSystemSizeKw] = useState(6.6);
+  const [typedSystemSizeKw, setTypedSystemSizeKw] = useState(6.6);
+
+  // Panels on the roof win over a size typed by hand: once a layout exists it
+  // IS the system, and letting the two disagree would put one number on the
+  // design and a different one on the quote.
+  const placedPanels = panelCount(arrays);
+  const sizeFromLayout = placedPanels > 0;
+  const systemSizeKw = sizeFromLayout ? layoutKw(arrays, panelWatts) : typedSystemSizeKw;
+  const setSystemSizeKw = setTypedSystemSizeKw;
   const [batteryCapacity, setBatteryCapacity] = useState(0); // kWh, 0 = solar only
   const [batteryEfficiency, setBatteryEfficiency] = useState(DEFAULT_BATTERY_EFFICIENCY);
   const [systemCost, setSystemCost] = useState(6500); // $ net of STCs
@@ -120,6 +135,12 @@ export function useQuote() {
     billPeriod, setBillPeriod,
     dayPercent, setDayPercent,
     nightPercent,
+    // design
+    imageAspect, setImageAspect,
+    arrays, setArrays,
+    notes, setNotes,
+    panelWatts, setPanelWatts,
+    placedPanels, sizeFromLayout,
     // system
     systemSizeKw, setSystemSizeKw,
     batteryCapacity, setBatteryCapacity,

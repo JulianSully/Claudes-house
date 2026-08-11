@@ -23,6 +23,7 @@ export default function SitePanel({
   setAddress,
   siteImage,
   setSiteImage,
+  setImageAspect,
   systemSizeKw,
   batteryCapacity,
 }) {
@@ -100,6 +101,12 @@ export default function SitePanel({
               src={siteImage.src}
               alt={`The property at ${tidyAddress(address) || "this address"}`}
               className="block h-[150px] w-full object-cover"
+              onLoad={(e) => {
+                // The design canvas needs the real shape of the photo, or the
+                // panels would sit on a differently-proportioned surface.
+                const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+                if (setImageAspect && w > 0 && h > 0) setImageAspect(w / h);
+              }}
             />
             <figcaption className="absolute bottom-2 left-2 rounded-md bg-ink-900/85 px-2 py-1 text-[11.5px] font-semibold text-white backdrop-blur">
               {systemSizeKw || 0} kW

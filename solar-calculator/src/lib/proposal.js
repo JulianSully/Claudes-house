@@ -36,6 +36,11 @@ export function buildProposal(q, { now = new Date() } = {}) {
       // why the share link drops the image and the PDF keeps it.
       imageSrc: q.siteImage?.src ?? null,
       imageKind: q.siteImage?.kind ?? null,
+      imageAspect: numeric(q.imageAspect) || 16 / 9,
+      // The roof layout rides along — a handful of small objects, so unlike the
+      // image it costs the share link almost nothing.
+      arrays: q.arrays ?? [],
+      notes: q.notes ?? [],
     },
 
     system: {
@@ -43,6 +48,8 @@ export function buildProposal(q, { now = new Date() } = {}) {
       batteryKwh: numeric(q.batteryCapacity),
       batteryEfficiencyPercent: numeric(q.batteryEfficiency),
       installedPrice: numeric(q.systemCost),
+      panelCount: numeric(q.placedPanels),
+      panelWatts: numeric(q.panelWatts),
       productionFactor: numeric(q.productionFactor),
     },
 

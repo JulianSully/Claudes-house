@@ -46,6 +46,10 @@ src/
   ProposalDocument.jsx      the customer-facing proposal, rendered from data
   components/SitePanel.jsx  address, customer name, house image
   components/EnergyDonut.jsx
+  design/layout.js          panel arrays + notes; panel count -> kW
+  design/layout.test.js
+  design/DesignCanvas.jsx   the SVG work surface (also renders read-only on the proposal)
+  design/DesignStage.jsx    tools, properties panel, array list
   components/ProjectionCharts.jsx
   components/ui.jsx         panels, property rows, stat tiles, allocation bars
   App.jsx                   mode toggle, share-link routing
@@ -102,6 +106,29 @@ When usage is stated directly, the app divides the bill's usage portion by it
 and shows the customer's real rate. More than 8% away from the entered tariff
 and it says so, because that gap is a controlled load or a discount worth
 knowing about before quoting.
+
+## The design screen
+
+A flat 2D work surface over the site image: drop panel arrays on the roof, drag
+them into place, rotate them, and drop annotations wherever something needs
+calling out. Reached from the **Design** tab.
+
+Flat and 2D deliberately — a rep is placing panels on a roof they can see, not
+modelling a building, and a surface that rotates in three axes makes that
+harder rather than easier.
+
+**The layout sets the system size.** 18 panels at 440 W is a 7.92 kW system, and
+the Energy tab's size field goes read-only saying where the number came from.
+That is the screen's one real job: without it the layout would be decoration and
+the rep would still be typing a size by hand.
+
+Everything lives in the viewBox units of an SVG laid over the image — 1000 wide,
+and however tall the image's aspect ratio makes it. One uniform coordinate
+system means rotation behaves, drag maths stays simple, and the same markup
+scales into the customer's proposal and the PDF, where it renders read-only.
+
+What it is not: no shading study, no string design, no roof measurement, no
+panel-level production. Anything claiming those would need a real site survey.
 
 ## The house image
 

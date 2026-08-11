@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { SUN_HOURS_PER_DAY } from "./calc/solarCalc";
+import DesignStage from "./design/DesignStage";
 import SitePanel from "./components/SitePanel";
 import { tidyAddress } from "./lib/siteImage";
 import { money, kwh, kwh1, money0, years } from "./lib/format";
@@ -47,15 +48,16 @@ const C = {
 
 const NAV = [
   { icon: LayoutGrid, label: "Projects" },
-  { icon: PanelsTopLeft, label: "Design" },
-  { icon: Zap, label: "Energy", active: true },
+  { icon: PanelsTopLeft, label: "Design", stage: "Design" },
+  { icon: Zap, label: "Energy", stage: "Energy" },
   { icon: FileText, label: "Proposal" },
   { icon: Users, label: "Customers" },
 ];
 
-const STAGES = ["Design", "Energy", "Proposal", "Contract"];
+const STAGES = ["Design", "Energy"];
 
 export default function RepMode({ q, modeToggle }) {
+  const [stage, setStage] = useState("Energy");
   const {
     supplyCharge, setSupplyCharge,
     usageCharge, setUsageCharge,
@@ -74,7 +76,8 @@ export default function RepMode({ q, modeToggle }) {
     sunHours, setSunHours, productionFactor,
     customerName, setCustomerName,
     address, setAddress,
-    siteImage, setSiteImage,
+    siteImage, setSiteImage, setImageAspect,
+    placedPanels, sizeFromLayout,
     days, periodWord, periodShort,
     results, economics, derived, hasBattery,
   } = q;
@@ -96,21 +99,25 @@ export default function RepMode({ q, modeToggle }) {
           <Sun size={18} strokeWidth={2.5} />
         </div>
         <div className="flex flex-1 flex-col gap-1">
-          {NAV.map(({ icon: Icon, label, active }) => (
-            <button
-              key={label}
-              type="button"
-              title={label}
-              aria-current={active ? "page" : undefined}
-              className={`group grid h-10 w-10 place-items-center rounded-lg transition ${
-                active
-                  ? "bg-white/10 text-white"
-                  : "text-slate-500 hover:bg-white/5 hover:text-slate-200"
-              }`}
-            >
-              <Icon size={17} strokeWidth={2} />
-            </button>
-          ))}
+          {NAV.map(({ icon: Icon, label, stage: target }) => {
+            const active = target === stage;
+            return (
+              <button
+                key={label}
+                type="button"
+                title={label}
+                aria-current={active ? "page" : undefined}
+                onClick={target ? () => setStage(target) : undefined}
+                className={`group grid h-10 w-10 place-items-center rounded-lg transition ${
+                  active
+                    ? "bg-white/10 text-white"
+                    : "text-slate-500 hover:bg-white/5 hover:text-slate-200"
+                }`}
+              >
+                <Icon size={17} strokeWidth={2} />
+              </button>
+            );
+          })}
         </div>
         <button
           type="button"
@@ -152,25 +159,30 @@ export default function RepMode({ q, modeToggle }) {
           </div>
 
           <div className="flex gap-5 overflow-x-auto px-5">
-            {STAGES.map((s) => {
-              const active = s === "Energy";
+            {STAGES.map((name) => {
+              const active = name === stage;
               return (
                 <button
-                  key={s}
+                  key={name}
                   type="button"
+                  onClick={() => setStage(name)}
+                  aria-current={active ? "page" : undefined}
                   className={`-mb-px whitespace-nowrap border-b-2 pb-2.5 pt-0.5 text-[13px] font-medium transition ${
                     active
                       ? "border-brand-600 text-brand-700"
                       : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
                 >
-                  {s}
+                  {name}
                 </button>
               );
             })}
           </div>
         </header>
 
+        {stage === "Design" ? (
+          <DesignStage q={q} />
+        ) : (
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* ---------- left input panel ---------- */}
           <aside className="w-full shrink-0 border-b border-slate-200 bg-white lg:w-[340px] lg:overflow-y-auto lg:border-b-0 lg:border-r">
@@ -181,18 +193,34 @@ export default function RepMode({ q, modeToggle }) {
               setAddress={setAddress}
               siteImage={siteImage}
               setSiteImage={setSiteImage}
+              setImageAspect={setImageAspect}
               systemSizeKw={systemSizeKw}
               batteryCapacity={batteryCapacity}
             />
 
             <Panel title="Proposed system" icon={Sun}>
-              <InputRow
-                label="System size"
-                unit="kW"
-                value={systemSizeKw}
-                onChange={setSystemSizeKw}
-                step="0.1"
-              />
+              {sizeFromLayout ? (
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-[13px] leading-tight text-slate-600">
+                    System size
+                    <span className="block text-[11px] text-slate-400">
+                      from {placedPanels} panels on the Design tab
+                    </span>
+                  </span>
+                  <span className="flex h-9 w-[132px] items-center justify-end rounded-md border border-slate-200 bg-slate-50 px-2.5 font-mono text-[13px] tabular-nums text-slate-900">
+                    {systemSizeKw.toFixed(2)}
+                    <span className="pl-1 text-[11px] text-slate-400">kW</span>
+                  </span>
+                </div>
+              ) : (
+                <InputRow
+                  label="System size"
+                  unit="kW"
+                  value={systemSizeKw}
+                  onChange={setSystemSizeKw}
+                  step="0.1"
+                />
+              )}
               <InputRow
                 label="Battery capacity"
                 hint="0 for solar only"
@@ -751,6 +779,7 @@ Every figure here is an estimate, not a quote or a guarantee. It runs on daily
             </div>
           </main>
         </div>
+        )}
 
         {/* Small screens scroll the panel and the results as one page, so the
             headline number is pinned where it stays visible while editing. */}
