@@ -1,7 +1,5 @@
 import { useMemo } from "react";
 
-import { allocateAverageDay } from "./profiles.js";
-
 /**
  * LOCKED CALCULATION MODULE — do not change the maths in `computeResults`.
  *
@@ -17,22 +15,13 @@ import { allocateAverageDay } from "./profiles.js";
  *   3. Priority: solar -> day usage (self-consumption) -> battery (takes the
  *      top-up it needs) -> export (everything else). Then separately:
  *      battery -> night usage -> grid (whatever the battery cannot cover).
- *   4. `productionFactor` (kWh/kW/day) drives production. It was originally
- *      fixed at 5 and hidden; it is now set from region + season and is
- *      editable, because 5 is optimistic as an annual average for most of
- *      Australia and a hidden constant that size is the biggest single
- *      unchecked lever in the estimate. See REGIONS below.
+ *   4. Production is a flat `SUN_HOURS_PER_DAY` of output — 5 hours, so a
+ *      6.6 kW system makes about 33 kWh a day. One number, editable, no
+ *      seasonal or hourly modelling: a quoting tool the rep can explain to a
+ *      customer in one sentence beats a more elaborate one they cannot.
  *   5. The battery loses energy on the round trip. To deliver L kWh at night
  *      it must store L / efficiency, so the charge is sized on the delivered
  *      figure and the difference is a real loss, not free energy.
- *
- * On rule 3: the battery is topped up by the amount last night drew out of it,
- * NOT to its full capacity. It begins each day already holding whatever the
- * night did not consume, so a 16 kWh battery serving a 10 kWh night load takes
- * on 10 kWh and the rest of the spare solar is exported. Filling to capacity
- * instead would strand energy in the battery that is neither consumed nor sold
- * — on a 16 kWh battery against a 4.8 kWh night load that was roughly 1,000
- * kWh, about $61 of unclaimed feed-in, per quarter.
  *
  * Verified test case (see solarCalc.test.js — run `npm test` after ANY change
  * to this file): $281/month bill, $1.10/day supply, 32c/kWh usage, 6c/kWh
@@ -42,51 +31,17 @@ import { allocateAverageDay } from "./profiles.js";
  */
 
 /**
- * Indicative annual-average yield in kWh per kW installed per day, with rough
- * summer and winter figures for the same location.
+ * Peak sun hours per day — the flat average this tool runs on.
  *
- * These are PLANNING NUMBERS, not measurements. Published sources disagree by
- * a few tenths — CEC-derived zone ratings put Sydney anywhere from 3.9 to 4.2
- * — and real yield moves with orientation, tilt, shading and soiling. They are
- * deliberately editable in the UI. Calibrate them against your own fleet's
- * monitoring data as soon as you have enough installs to do so; that is worth
- * more than any published table.
- *
- * The seasonal spread matters more than the annual figure for quoting: a
- * customer sold on an annual average whose system is commissioned in May sees
- * their first bill against the winter number, not the average.
+ * Multiply by system size for daily output: 6.6 kW x 5 = 33 kWh a day. It is a
+ * rule of thumb, not a yield model, and that is the point. It is editable in
+ * the UI so a rep who knows their patch can set it to whatever their own
+ * installs actually do.
  */
-export const REGIONS = {
-  nt: { label: "Darwin / NT", annual: 5.0, summer: 4.8, winter: 5.3 },
-  wa: { label: "Perth / WA", annual: 4.9, summer: 6.4, winter: 3.1 },
-  qld: { label: "Brisbane / QLD", annual: 4.5, summer: 5.3, winter: 3.7 },
-  sa: { label: "Adelaide / SA", annual: 4.4, summer: 6.1, winter: 2.6 },
-  act: { label: "Canberra / ACT", annual: 4.2, summer: 5.6, winter: 2.7 },
-  nsw: { label: "Sydney / NSW", annual: 4.1, summer: 5.1, winter: 3.0 },
-  vic: { label: "Melbourne / VIC", annual: 3.8, summer: 5.3, winter: 2.1 },
-  tas: { label: "Hobart / TAS", annual: 3.5, summer: 5.0, winter: 1.7 },
-};
-
-export const SEASONS = [
-  { value: "annual", label: "Annual" },
-  { value: "summer", label: "Summer" },
-  { value: "winter", label: "Winter" },
-];
-
-export const DEFAULT_REGION = "nsw";
-export const DEFAULT_SEASON = "annual";
-
-export const productionFactorFor = (region, season) =>
-  REGIONS[region]?.[season] ?? REGIONS[DEFAULT_REGION].annual;
+export const SUN_HOURS_PER_DAY = 5;
 
 /** Round-trip efficiency of a typical lithium home battery. */
 export const DEFAULT_BATTERY_EFFICIENCY = 90; // %
-
-/**
- * The original hardcoded factor, kept so the regression tests can pin the
- * allocation logic at a known value independent of the region table.
- */
-export const LEGACY_PRODUCTION_FACTOR = 5.0;
 
 export const NUMBER = (v) => (Number.isFinite(v) ? v : 0);
 
@@ -100,7 +55,6 @@ export function computeResults({
   productionFactor,
   batteryCapacity,
   batteryEfficiency = 100, // %, round trip
-  season = "annual", // sets the daylight window used for the overlap
   dayPercent,
   nightPercent,
   days,
@@ -146,38 +100,30 @@ export function computeResults({
   const dailyNightKwh = nightKwh / days;
   const dailyProduction = sizeKw * prodFactor;
 
-  // Solar only offsets what it OVERLAPS. Daytime demand peaks at 7am and 5pm,
-  // when the sun is low or gone, so an hour-by-hour overlap is the difference
-  // between an honest estimate and one claiming the customer never buys power
-  // again. The day is also run across a mix of clear, mixed and overcast
-  // weather, because averaging the sun first hides the cloudy days on which the
-  // house buys power and the battery never fills.
+  const dailySelfConsumed = Math.min(dailyProduction, dailyDayKwh);
+  const dailyExcess = Math.max(0, dailyProduction - dailyDayKwh);
+  const dailyRemainingDay = Math.max(0, dailyDayKwh - dailyProduction);
+
+  // The battery starts the day part-full: it only lost whatever last night
+  // drew out of it. So the top-up it needs is the night load, not its whole
+  // capacity — a 16 kWh battery covering 10 kWh of night usage takes 10 kWh
+  // back and the remaining 6 kWh is still sitting there. Capped three ways:
+  // by the solar actually spare, by capacity, and by the night load.
   //
-  // The day/night slider still sets how much of the total lands in daylight
-  // hours; the shapes only decide how it is spread within them.
-  // See calc/profiles.js.
+  // Round-trip losses inflate that top-up: delivering L kWh after dark means
+  // storing L / efficiency, so the charge is sized on the delivered figure.
   const efficiency = Math.min(1, Math.max(0, NUMBER(batteryEfficiency) / 100));
+  const chargeNeededForNight = efficiency > 0 ? dailyNightKwh / efficiency : 0;
+  const dailyBatteryCharge = Math.min(dailyExcess, batteryKwh, chargeNeededForNight);
 
-  const day = allocateAverageDay({
-    dailyUsage: dailyDayKwh + dailyNightKwh,
-    dailyProduction,
-    dayPercent,
-    season,
-    batteryKwh,
-    efficiency,
-  });
+  // Everything past that top-up is sold rather than sitting in a full battery
+  // earning nothing.
+  const dailyExported = dailyExcess - dailyBatteryCharge;
 
-  const dailySelfConsumed = day.selfConsumed;
-  const dailyExcess = day.excess;
-  const dailyBatteryCharge = day.batteryCharge;
-  const dailyExported = day.exported;
-  const dailyBatteryLoss = day.batteryCharge - day.batteryDelivered;
-  const dailyNightCovered = day.nightCovered;
-  const dailyDayCoveredByBattery = day.dayCoveredByBattery;
-  const dailyRemainingNight = day.remainingNight;
-  const dailyRemainingDay = day.remainingDay;
-  const daytimeShortfall = day.daytimeShortfall;
-  const darkLoad = day.darkLoad;
+  // What comes back out is what went in, less the round-trip loss.
+  const dailyNightCovered = dailyBatteryCharge * efficiency;
+  const dailyBatteryLoss = dailyBatteryCharge - dailyNightCovered;
+  const dailyRemainingNight = Math.max(0, dailyNightKwh - dailyNightCovered);
 
   // Scale daily figures back up to the full billing period
   const systemProduction = dailyProduction * days;
@@ -191,8 +137,7 @@ export function computeResults({
 
   const savingsSelfConsumed = selfConsumed * usageRate;
   const savingsExport = exported * fit;
-  const dayCoveredByBattery = dailyDayCoveredByBattery * days;
-  const savingsBattery = (nightCoveredByBattery + dayCoveredByBattery) * usageRate;
+  const savingsBattery = nightCoveredByBattery * usageRate;
   const totalSavings = savingsSelfConsumed + savingsExport + savingsBattery;
 
   const newBill = Math.max(0, bill - totalSavings);
@@ -202,16 +147,14 @@ export function computeResults({
     totalKwh, dayKwh, nightKwh, systemProduction,
     usagePortion, effectiveRate, usageFromBill: !(NUMBER(knownUsageKwh) > 0),
     selfConsumed, exported, remainingDayUsage,
-    batteryCharge, nightCoveredByBattery, dayCoveredByBattery,
-    batteryLoss, remainingNightUsage, daytimeShortfall, darkLoad,
+    batteryCharge, nightCoveredByBattery, batteryLoss, remainingNightUsage,
     savingsSelfConsumed, savingsExport, savingsBattery, totalSavings,
     newBill, savingsPercent,
     // Daily-average figures, exposed for display only. These are the same
     // numbers the period totals above are derived from — never recompute
     // them by dividing a period total by anything other than `days`.
     dailyProduction, dailySelfConsumed, dailyExported, dailyBatteryCharge,
-    dailyNightCovered, dailyDayCoveredByBattery, dailyBatteryLoss,
-    dailyRemainingDay, dailyRemainingNight,
+    dailyNightCovered, dailyBatteryLoss, dailyRemainingDay, dailyRemainingNight,
     dailyDayKwh, dailyNightKwh,
   };
 }
@@ -246,7 +189,6 @@ export function useSolarResults(inputs) {
     supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
     dayPercent, systemSizeKw, productionFactor, batteryCapacity,
     batteryEfficiency = 100, days, nightPercent, knownUsageKwh,
-    season = "annual",
   } = inputs;
 
   return useMemo(
@@ -254,10 +196,10 @@ export function useSolarResults(inputs) {
       computeResults({
         billAmount, knownUsageKwh, supplyCharge, usageCharge, feedInTariff,
         systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency,
-        season, dayPercent, nightPercent, days,
+        dayPercent, nightPercent, days,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [supplyCharge, usageCharge, feedInTariff, billAmount, knownUsageKwh, billPeriod, dayPercent, systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency, season, days, nightPercent]
+    [supplyCharge, usageCharge, feedInTariff, billAmount, knownUsageKwh, billPeriod, dayPercent, systemSizeKw, productionFactor, batteryCapacity, batteryEfficiency, days, nightPercent]
   );
 }
 

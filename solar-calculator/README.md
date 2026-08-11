@@ -32,7 +32,7 @@ npm run build
 ```
 src/
   calc/solarCalc.js         LOCKED calculation — computeResults() + useSolarResults()
-                            plus REGIONS (yield table) and computeEconomics()
+                            plus computeEconomics()
   calc/solarCalc.test.js    verified case + one guard per locked rule
   state/useQuote.js         one quote's inputs, shared by both modes
   lib/format.js             AUD and en-AU formatting — all of it, in one place
@@ -48,41 +48,28 @@ src/
   App.jsx                   mode toggle, share-link routing
 ```
 
-## When power is used, and when the sun is making it
+## Average hours of sunlight
 
-`calc/profiles.js`. This is what killed the old "From grid 0.0" — an estimate
-claiming the customer never buys a kWh again.
+One number, typed in: how many hours of good sun a day. Multiply by system size
+for daily output.
 
-Two things were wrong with splitting a day into "day" and "night":
+```
+6.6 kW x 5 hrs = 33 kWh a day, every day of the year
+```
 
-**Daytime demand isn't flat.** It spikes at 6–8am and again 5–9pm, and at both
-ends the sun is low or gone. So demand is spread over 24 hours using a standard
-Australian residential shape, production follows a half-sine across the daylight
-window, and self-consumption is the *overlap* — hour by hour. Solar only gets
-credit for what it actually meets.
+That is the whole yield model, deliberately. Earlier versions carried a
+state-by-state table, a summer/winter split, an hour-by-hour load shape against
+a solar curve, and a clear/mixed/overcast weather mix. All of it was more
+defensible on paper and none of it was worth the complexity for a tool a rep
+uses in a driveway — a quoting number you can explain to a customer in one
+sentence beats a better one you cannot. Sitting in git history if it is ever
+wanted back.
 
-**Not every day is an average day.** One average day quietly assumes the sun
-behaves identically every day. On a bright day the extra output is exported at
-6c; on an overcast day the house buys at 32c and the battery never refills.
-Averaging first hides both, and the error only runs one way — it flatters the
-estimate. So the day is run three times (clear / mixed / overcast, 35/40/25)
-and weighted. The factors are normalised so the weighted mean is exactly 1.0:
-the yield the rep entered is preserved, only its spread across days is modelled.
-The battery is allocated *inside* that loop, because on an overcast day it
-cannot fill and that evening gets bought from the grid.
+The field is editable, so set it to whatever your own installs actually do.
 
-**The day/night slider still governs the split**, which is what the rep wanted.
-It sets how much of the total lands in daylight hours; the shapes only decide
-how each portion is distributed within its own hours. Set it to 60% and 60% of
-the kWh still lands in daylight — it's just no longer assumed that all of it
-meets a panel that happens to be producing at that moment.
-
-Effect on the sample quote ($450/quarter, 6.6 kW, Sydney annual, no battery):
-self-sufficiency drops from 100% to **58%**, and the customer buys **5 kWh a
-day** instead of nothing.
-
-Still not modelled: interval data (there is none), inverter clipping, panel
-degradation, and time-of-use tariffs.
+What this trades away, stated plainly: no seasonal variation (a winter quote
+reads the same as a summer one), and solar is assumed to cover daytime usage
+whenever daily production exceeds it, so self-sufficiency can read 100%.
 
 ## How usage is established
 
@@ -169,11 +156,8 @@ change the maths in `computeResults` — it encodes four rules:
    consume. A 16 kWh battery serving a 10 kWh night load takes on 10 kWh and
    the rest of the spare solar is exported. So the daily charge is capped three
    ways: `min(spare solar, capacity, night load)`.
-4. **Production factor comes from location and season.** It was originally a
-   hidden constant of 5 kWh/kW/day. That is optimistic as an annual average for
-   most of Australia, and a hidden constant of that size was the single biggest
-   unchecked lever in the whole estimate, so it is now driven by a region and
-   season selector and stays editable. See `REGIONS` in `solarCalc.js`.
+4. **Production is a flat number of sun hours.** `SUN_HOURS_PER_DAY`, default 5,
+   editable in the UI. Same every day of the year.
 5. **The battery loses energy on the round trip.** Delivering L kWh after dark
    means storing `L / efficiency`, so the charge is sized on the delivered
    figure and the difference is booked as a real loss. Default 90%.
@@ -183,30 +167,14 @@ studio view's "self-sufficiency %" is an example: it is a ratio of numbers
 `computeResults` already returned, computed in the component, and it never feeds
 back into the allocation.
 
-### Yield assumptions
-
-`REGIONS` holds an indicative annual average plus summer and winter figures for
-each state. **They are planning numbers, not measurements.** Published sources
-disagree by a few tenths — CEC-derived zone ratings put Sydney anywhere between
-3.9 and 4.2 — and real yield moves with tilt, orientation, shading and soiling.
-The field is editable for exactly that reason, and the numbers should be
-recalibrated against your own monitoring data as soon as there are enough
-installs to do it.
-
-The seasonal spread matters more than the annual figure when quoting: a customer
-sold on an annual average whose system is commissioned in May judges it against
-the winter number. Quoting Sydney in winter drops production from 4.1 to 3.0
-kWh/kW/day and the sample quote from $429 to $389 a quarter.
-
 ### The verified case
 
-Pinned at the legacy 5.0 kWh/kW/day factor and a lossless battery, so the
-regression suite tests the allocation logic rather than whatever the region
-table or the efficiency default happen to say.
+Pinned at 5 sun hours and a lossless battery, so the regression suite tests the
+allocation logic rather than whatever the efficiency default happens to say.
 
 ```
 supply $1.10/day · usage 32c/kWh · feed-in 6c/kWh · 60/40 day-night split
-6.6 kW system · 16 kWh battery · 100% efficiency · 5.0 kWh/kW/day · 30-day month
+6.6 kW system · 16 kWh battery · 100% efficiency · 5 sun hours · 30-day month
 → 775 kWh total (465 day / 310 night)
 → day usage fully covered, night usage fully covered
 → 0 kWh of night usage left on the grid
@@ -272,14 +240,14 @@ credit alongside the new bill.
 Three separate things all pushed the saving the same way — up — and the first
 two have since been addressed:
 
-1. **A hidden 5.0 kWh/kW/day yield.** Optimistic as an annual average for most
-   of the country; roughly 20% high against a Sydney figure of ~4.1. *Fixed:*
-   region + season selector, editable.
+1. **A hidden 5.0 kWh/kW/day yield.** Now an explicit, editable "average hours
+   of sunlight" field rather than a constant buried in the code. Still 5 by
+   default — the rep's call, not the code's.
 2. **No battery round-trip losses.** Real batteries return about 90% of what
    goes in. *Fixed:* efficiency input, default 90%, loss shown as a line in the
    breakdown.
-3. **"Day usage" treated as fully available to the array.** *Fixed:* the day is
-   now modelled hour by hour — see below.
+3. **"Day usage" treated as fully available to the array.** Not modelled — see
+   "Average hours of sunlight" above for what that trades away.
 
 On the sample quote ($450/quarter, 6.6 kW, 16 kWh, Sydney annual) the first two
 together moved the estimate from $464 to $429 a quarter.

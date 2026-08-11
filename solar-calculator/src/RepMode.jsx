@@ -20,7 +20,7 @@ import {
   Wallet,
 } from "lucide-react";
 
-import { REGIONS, SEASONS } from "./calc/solarCalc";
+import { SUN_HOURS_PER_DAY } from "./calc/solarCalc";
 import SitePanel from "./components/SitePanel";
 import { tidyAddress } from "./lib/siteImage";
 import { money, kwh, kwh1, money0, years } from "./lib/format";
@@ -69,8 +69,7 @@ export default function RepMode({ q, modeToggle }) {
     batteryCapacity, setBatteryCapacity,
     batteryEfficiency, setBatteryEfficiency,
     systemCost, setSystemCost,
-    region, setRegion, season, setSeason,
-    productionFactor, setFactorOverride, suggestedFactor, factorIsOverridden,
+    sunHours, setSunHours, productionFactor,
     customerName, setCustomerName,
     address, setAddress,
     siteImage, setSiteImage,
@@ -210,44 +209,25 @@ export default function RepMode({ q, modeToggle }) {
               />
             </Panel>
 
-            <Panel title="Yield assumption" icon={Gauge}>
-              <SelectRow
-                label="Location"
-                value={region}
-                onChange={setRegion}
-                options={Object.entries(REGIONS).map(([value, r]) => ({
-                  value,
-                  label: r.label,
-                }))}
-              />
-              <SelectRow
-                label="Season"
-                value={season}
-                onChange={setSeason}
-                options={SEASONS}
-              />
+            <Panel title="Average hours of sunlight" icon={Gauge}>
               <InputRow
-                label="Production"
-                hint={
-                  factorIsOverridden
-                    ? `overridden — ${REGIONS[region].label} ${season} is ${suggestedFactor}`
-                    : `${REGIONS[region].label}, ${season}`
-                }
-                unit="kWh/kW/day"
-                value={productionFactor}
-                onChange={(v) => setFactorOverride(v === "" ? null : v)}
-                step="0.1"
+                label="Hours a day"
+                unit="hrs"
+                value={sunHours}
+                onChange={setSunHours}
+                step="0.5"
               />
-              <p className="flex items-start gap-1.5 pt-1 text-[11.5px] leading-relaxed text-slate-500">
-                <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
-                <span>
-                  Indicative planning figures — published sources vary by a few tenths, and
-                  real yield moves with tilt, orientation and shading. Quote on{" "}
-                  <span className="font-medium text-slate-600">winter</span> if the customer
-                  will judge the estimate by their first bill. Calibrate against your own
-                  monitoring data once you have it.
+              <div className="mt-1 rounded-lg bg-slate-50 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-500">
+                <span className="font-mono text-slate-700">
+                  {systemSizeKw || 0} kW x {sunHours || 0} hrs ={" "}
+                  {fmtKwh(results.dailyProduction)}
+                </span>{" "}
+                a day, every day of the year.
+                <span className="mt-1.5 block text-slate-400">
+                  A flat average — no seasonal or hourly modelling. Change it to match
+                  what your own installs actually do.
                 </span>
-              </p>
+              </div>
             </Panel>
 
             <Panel title="Tariff" icon={Receipt}>
@@ -364,9 +344,8 @@ export default function RepMode({ q, modeToggle }) {
               </div>
               <p className="flex items-start gap-1.5 pt-2 text-[11.5px] leading-relaxed text-slate-500">
                 <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
-Sets how much of their power is used in daylight hours. Within those hours it's
-                spread over a typical Australian household's day — morning and evening
-                peaks included — so solar only gets credit for what it actually overlaps.
+Sets how much of their power is used while the sun is up. Solar covers that
+                portion first; the rest is what the battery is for.
               </p>
             </Panel>
 
@@ -475,7 +454,7 @@ Sets how much of their power is used in daylight hours. Within those hours it's
               <Card
                 title="Daily energy balance"
                 icon={Zap}
-                subtitle="One average day, hour by hour, across a mix of clear, mixed and overcast weather — then multiplied out across the period. Solar only offsets what it actually overlaps."
+                subtitle="Averages for one day — the battery takes back what last night drew out and empties again, then the day is multiplied out across the period."
                 right={
                   <span className="rounded-md bg-slate-100 px-2 py-1 font-mono text-[11.5px] text-slate-500">
                     × {days} days
@@ -538,14 +517,8 @@ Sets how much of their power is used in daylight hours. Within those hours it's
                             color: C.solar,
                           },
                           {
-                            key: "batt",
-                            label: "From battery",
-                            value: results.dailyDayCoveredByBattery,
-                            color: C.battery,
-                          },
-                          {
                             key: "grid",
-                            label: "Bought — dawn & dusk",
+                            label: "From grid",
                             value: results.dailyRemainingDay,
                             color: C.grid,
                             textOn: C.gridInk,

@@ -36,9 +36,6 @@ export function buildProposal(q, { now = new Date() } = {}) {
       // why the share link drops the image and the PDF keeps it.
       imageSrc: q.siteImage?.src ?? null,
       imageKind: q.siteImage?.kind ?? null,
-      region: q.region,
-      regionLabel: q.regionLabel,
-      season: q.season,
     },
 
     system: {
@@ -94,7 +91,7 @@ export function buildProposal(q, { now = new Date() } = {}) {
 
     // Stated on the proposal so the customer sees what it rests on.
     assumptions: {
-      productionBasis: `${numeric(q.productionFactor)} kWh per kW per day (${q.regionLabel}, ${q.season})`,
+      productionBasis: `${numeric(q.productionFactor)} hours of good sun a day`,
       note:
         "Estimate based on daily averages from the bill supplied. Actual results vary with weather, " +
         "usage habits, roof orientation and shading.",

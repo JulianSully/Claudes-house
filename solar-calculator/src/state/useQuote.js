@@ -3,12 +3,9 @@ import { useMemo, useState } from "react";
 import {
   useSolarResults,
   computeEconomics,
-  productionFactorFor,
   DAYS_IN_PERIOD,
-  DEFAULT_REGION,
-  DEFAULT_SEASON,
   DEFAULT_BATTERY_EFFICIENCY,
-  REGIONS,
+  SUN_HOURS_PER_DAY,
 } from "../calc/solarCalc";
 
 /**
@@ -44,15 +41,9 @@ export function useQuote() {
   const [batteryEfficiency, setBatteryEfficiency] = useState(DEFAULT_BATTERY_EFFICIENCY);
   const [systemCost, setSystemCost] = useState(6500); // $ net of STCs
 
-  // Yield
-  const [region, setRegion] = useState(DEFAULT_REGION);
-  const [season, setSeason] = useState(DEFAULT_SEASON);
-  const [factorOverride, setFactorOverride] = useState(null);
-
-  const suggestedFactor = productionFactorFor(region, season);
-  const productionFactor = factorOverride ?? suggestedFactor;
-  const factorIsOverridden =
-    factorOverride !== null && Math.abs(factorOverride - suggestedFactor) > 1e-9;
+  // Yield — a flat number of peak sun hours a day. 6.6 kW x 5 = 33 kWh/day.
+  const [sunHours, setSunHours] = useState(SUN_HOURS_PER_DAY);
+  const productionFactor = sunHours;
 
   const days = DAYS_IN_PERIOD[billPeriod];
   const nightPercent = 100 - dayPercent;
@@ -62,7 +53,6 @@ export function useQuote() {
   const results = useSolarResults({
     supplyCharge, usageCharge, feedInTariff, billAmount, billPeriod,
     knownUsageKwh: usageMode === "known" ? knownUsageKwh : 0,
-    season,
     dayPercent, systemSizeKw, productionFactor, batteryCapacity,
     batteryEfficiency, days, nightPercent,
   });
@@ -112,13 +102,8 @@ export function useQuote() {
     batteryEfficiency, setBatteryEfficiency,
     systemCost, setSystemCost,
     // yield
-    region, setRegion: (v) => { setRegion(v); setFactorOverride(null); },
-    season, setSeason: (v) => { setSeason(v); setFactorOverride(null); },
+    sunHours, setSunHours,
     productionFactor,
-    setFactorOverride,
-    suggestedFactor,
-    factorIsOverridden,
-    regionLabel: REGIONS[region]?.label ?? "",
     // derived
     days, periodWord, periodShort,
     results, economics, derived,

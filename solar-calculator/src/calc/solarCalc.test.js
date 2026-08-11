@@ -2,23 +2,19 @@ import { describe, it, expect } from "vitest";
 import {
   computeResults,
   computeEconomics,
-  productionFactorFor,
-  LEGACY_PRODUCTION_FACTOR,
+  SUN_HOURS_PER_DAY,
   DEFAULT_BATTERY_EFFICIENCY,
-  DEFAULT_REGION,
-  REGIONS,
   DAYS_IN_PERIOD,
 } from "./solarCalc";
 
-// The regression suite pins the allocation at a lossless battery and the
-// original 5 kWh/kW/day factor, so it tests the maths rather than whatever
-// the region table or the efficiency default happen to say this week.
+// The regression suite pins the allocation at a lossless battery, so it tests
+// the maths rather than whatever the efficiency default happens to say.
 const TARIFF = {
   supplyCharge: 1.1, // $/day
   usageCharge: 32, // c/kWh
   feedInTariff: 6, // c/kWh
   systemSizeKw: 6.6,
-  productionFactor: LEGACY_PRODUCTION_FACTOR,
+  productionFactor: SUN_HOURS_PER_DAY,
   batteryCapacity: 16,
   batteryEfficiency: 100,
   dayPercent: 60,
@@ -51,24 +47,20 @@ describe("verified case — 775 kWh over 30 days", () => {
     expect(r.nightKwh).toBeCloseTo(310, 6);
   });
 
-  it("covers most, but not all, of daylight demand", () => {
-    // Not 465. The 7am and 4pm peaks land when the sun is low, and a quarter
-    // of days are overcast, so 29 kWh of daytime demand is still bought.
-    expect(r.selfConsumed).toBeCloseTo(416.09, 1);
-    expect(r.remainingDayUsage).toBeCloseTo(29.15, 1);
-    expect(r.remainingDayUsage).toBeGreaterThan(0);
+  it("covers day usage in full", () => {
+    expect(r.remainingDayUsage).toBeCloseTo(0, 9);
+    expect(r.selfConsumed).toBeCloseTo(465, 6);
   });
 
-  it("covers most of the evening from the battery", () => {
-    expect(r.nightCoveredByBattery).toBeCloseTo(260.51, 1);
-    expect(r.dayCoveredByBattery).toBeCloseTo(19.76, 1);
-    // On overcast days there is not enough spare solar to refill it.
-    expect(r.remainingNightUsage).toBeCloseTo(49.49, 1);
+  it("covers night usage in full — nothing left on the grid", () => {
+    expect(r.remainingNightUsage).toBeCloseTo(0, 9);
+    expect(r.nightCoveredByBattery).toBeCloseTo(310, 6);
   });
 
   it("exports the spare solar the battery does not need", () => {
-    expect(r.dailyExported).toBeCloseTo(9.788, 2);
-    expect(r.exported).toBeCloseTo(293.63, 1);
+    // 33 produced − 15.5 day − 10.333 battery top-up = 7.167 exported.
+    expect(r.dailyExported).toBeCloseTo(7.166666666, 6);
+    expect(r.exported).toBeCloseTo(215, 6);
   });
 
   it("produces 33 kWh/day from the 6.6 kW system", () => {
@@ -87,12 +79,13 @@ describe("brief's literal inputs — $450/month", () => {
     expect(r.nightKwh).toBeCloseTo(521.25, 6);
   });
 
-  it("leaves a large shortfall day and night on a heavy user", () => {
-    // 43 kWh/day of demand against 33 kWh/day of production: the panels
-    // cannot cover the day, and what little is spare cannot cover the night.
-    expect(r.remainingDayUsage).toBeCloseTo(173.28, 1);
-    expect(r.dailyBatteryCharge).toBeCloseTo(10.792, 2);
-    expect(r.remainingNightUsage).toBeCloseTo(197.49, 1);
+  it("covers day usage but leaves night usage on the grid", () => {
+    expect(r.remainingDayUsage).toBeCloseTo(0, 9);
+    // 26.06 kWh/day of day usage leaves only 6.94 kWh to charge a 16 kWh
+    // battery, so nothing is exported and the battery cannot cover the night.
+    expect(r.dailyBatteryCharge).toBeCloseTo(6.9375, 9);
+    expect(r.exported).toBeCloseTo(0, 9);
+    expect(r.remainingNightUsage).toBeCloseTo(313.125, 6);
   });
 });
 
@@ -162,15 +155,12 @@ describe("rule 3 — allocation priority", () => {
     expect(r.remainingDayUsage).toBeGreaterThan(0);
   });
 
-  it("tops the battery up by what will be drawn out, not to full capacity", () => {
-    // The battery starts the day already holding what last night didn't use,
-    // so extra capacity beyond the load it serves changes nothing: 16 kWh and
-    // 20 kWh give the identical answer.
-    const at16 = run({ billAmount: 281, days: 30, batteryCapacity: 16 });
-    const at20 = run({ billAmount: 281, days: 30, batteryCapacity: 20 });
-    expect(at20.dailyBatteryCharge).toBeCloseTo(at16.dailyBatteryCharge, 9);
-    expect(at20.dailyBatteryCharge).toBeCloseTo(9.3425, 3);
-    expect(at20.dailyExported).toBeCloseTo(9.7878, 3);
+  it("tops the battery up by the night load, not to full capacity", () => {
+    // 17.5 kWh/day spare and 20 kWh of capacity, but the night only draws
+    // 10.333 — so that is all it takes back.
+    const r = run({ billAmount: 281, days: 30, batteryCapacity: 20 });
+    expect(r.dailyBatteryCharge).toBeCloseTo(310 / 30, 9);
+    expect(r.dailyExported).toBeCloseTo(17.5 - 310 / 30, 9);
   });
 
   it("strands nothing — everything stored is drawn back out the same day", () => {
@@ -178,10 +168,8 @@ describe("rule 3 — allocation priority", () => {
       for (const billAmount of [120, 281, 450, 900]) {
         for (const days of [30, 91]) {
           const r = run({ billAmount, days, batteryCapacity });
-          // At 100% efficiency, what goes in comes back out — split between
-          // the evening load and the dawn shortfall the panels missed.
           expect(
-            r.nightCoveredByBattery + r.dayCoveredByBattery,
+            r.nightCoveredByBattery,
             `${batteryCapacity}kWh/$${billAmount}/${days}d`
           ).toBeCloseTo(r.batteryCharge, 6);
         }
@@ -189,29 +177,19 @@ describe("rule 3 — allocation priority", () => {
     }
   });
 
-  it("still respects capacity when the load exceeds it", () => {
-    // A 4 kWh battery cannot take more than 4 kWh on any day, and the evening
-    // it cannot reach is bought from the grid.
+  it("still respects capacity when the night load exceeds it", () => {
+    // 4 kWh battery against a 10.333 kWh night: capacity is the binding cap.
     const r = run({ billAmount: 281, days: 30, batteryCapacity: 4 });
-    expect(r.dailyBatteryCharge).toBeLessThanOrEqual(4 + 1e-9);
-    expect(r.dailyBatteryCharge).toBeCloseTo(3.9338, 3);
-    expect(r.dailyRemainingNight).toBeCloseTo(6.3995, 3);
+    expect(r.dailyBatteryCharge).toBeCloseTo(4, 9);
+    expect(r.dailyRemainingNight).toBeCloseTo(310 / 30 - 4, 9);
   });
 
-  it("a bigger battery never charges less, or exports more", () => {
-    let previousCharge = -1;
-    let previousExport = Infinity;
-    for (const batteryCapacity of [0, 2, 4, 8, 16, 30]) {
-      const r = run({ billAmount: 281, days: 30, batteryCapacity });
-      expect(r.dailyBatteryCharge, `${batteryCapacity}kWh`).toBeGreaterThanOrEqual(
-        previousCharge - 1e-9
-      );
-      expect(r.dailyExported, `${batteryCapacity}kWh`).toBeLessThanOrEqual(
-        previousExport + 1e-9
-      );
-      previousCharge = r.dailyBatteryCharge;
-      previousExport = r.dailyExported;
-    }
+  it("still respects available solar when that is the binding cap", () => {
+    // 26.06 kWh/day of day usage leaves only 6.9375 spare for a 16 kWh
+    // battery facing a 17.375 kWh night — the spare solar is the limit.
+    const r = run({ billAmount: 450, days: 30, batteryCapacity: 16 });
+    expect(r.dailyBatteryCharge).toBeCloseTo(6.9375, 9);
+    expect(r.dailyExported).toBeCloseTo(0, 9);
   });
 
   it("energy balances: production = self-consumed + stored + exported", () => {
@@ -227,68 +205,50 @@ describe("rule 3 — allocation priority", () => {
 
   it("night usage draws only on what the battery actually stored", () => {
     const r = run({ billAmount: 281, days: 30, batteryCapacity: 4 });
-    expect(r.dailyNightCovered).toBeLessThanOrEqual(r.dailyBatteryCharge + 1e-9);
-    expect(r.dailyRemainingNight).toBeGreaterThan(0);
+    expect(r.dailyNightCovered).toBeCloseTo(4, 9);
+    expect(r.dailyRemainingNight).toBeCloseTo(310 / 30 - 4, 9);
   });
 });
 
-describe("rule 4 — production factor comes from region + season", () => {
-  it("keeps the legacy constant available for regression pinning", () => {
-    expect(LEGACY_PRODUCTION_FACTOR).toBe(5);
+describe("rule 4 — production is a flat number of sun hours", () => {
+  it("is 5 hours a day", () => {
+    expect(SUN_HOURS_PER_DAY).toBe(5);
   });
 
-  it("resolves every region and season to a sane yield", () => {
-    for (const [key, region] of Object.entries(REGIONS)) {
-      for (const season of ["annual", "summer", "winter"]) {
-        const f = productionFactorFor(key, season);
-        expect(f, `${key}/${season}`).toBeGreaterThan(1);
-        expect(f, `${key}/${season}`).toBeLessThan(7);
-      }
-      // Winter never beats summer outside the tropics; the NT is the one
-      // place the dry season outperforms the wet.
-      if (key !== "nt") {
-        expect(region.winter, key).toBeLessThan(region.summer);
-      }
-      // The annual average has to sit between the two seasonal extremes,
-      // whichever way round they fall.
-      expect(region.annual, key).toBeGreaterThanOrEqual(
-        Math.min(region.summer, region.winter)
-      );
-      expect(region.annual, key).toBeLessThanOrEqual(
-        Math.max(region.summer, region.winter)
-      );
-    }
+  it("makes a 6.6 kW system produce about 33 kWh a day", () => {
+    const r = run({ billAmount: 281, days: 30, productionFactor: SUN_HOURS_PER_DAY });
+    expect(r.dailyProduction).toBeCloseTo(33, 6);
   });
 
-  it("falls back to the default region for an unknown one", () => {
-    expect(productionFactorFor("atlantis", "annual")).toBe(
-      REGIONS[DEFAULT_REGION].annual
-    );
-  });
-
-  it("scales production linearly with the factor", () => {
+  it("scales production linearly with the hours", () => {
     const at = (productionFactor) =>
       run({ billAmount: 281, days: 30, productionFactor }).systemProduction;
-    expect(at(4.1)).toBeCloseTo(at(8.2) / 2, 6);
+    expect(at(4)).toBeCloseTo(at(8) / 2, 6);
+  });
+
+  it("is the same every day of the year — no seasonal variation", () => {
+    const summer = run({ billAmount: 281, days: 30 });
+    const winter = run({ billAmount: 281, days: 30 });
+    expect(winter.dailyProduction).toBe(summer.dailyProduction);
   });
 });
 
 describe("rule 5 — battery round-trip losses", () => {
-  it("loses nothing at 100%", () => {
+  it("is lossless at 100%", () => {
     const r = run({ billAmount: 281, days: 30, batteryEfficiency: 100 });
+    expect(r.dailyBatteryCharge).toBeCloseTo(310 / 30, 9);
+    expect(r.dailyNightCovered).toBeCloseTo(310 / 30, 9);
     expect(r.batteryLoss).toBeCloseTo(0, 9);
-    expect(r.dailyNightCovered + r.dailyDayCoveredByBattery).toBeCloseTo(
-      r.dailyBatteryCharge,
-      6
-    );
   });
 
   it("stores more than it delivers, and the gap is the loss", () => {
     const r = run({ billAmount: 281, days: 30, batteryEfficiency: 90 });
-    const delivered = r.dailyNightCovered + r.dailyDayCoveredByBattery;
-    expect(delivered).toBeCloseTo(r.dailyBatteryCharge * 0.9, 6);
-    expect(r.dailyBatteryLoss).toBeCloseTo(r.dailyBatteryCharge * 0.1, 6);
-    expect(r.dailyBatteryCharge).toBeCloseTo(10.2768, 3);
+    const night = 310 / 30;
+    // Delivering 10.333 kWh after dark means storing 10.333 / 0.9.
+    expect(r.dailyBatteryCharge).toBeCloseTo(night / 0.9, 9);
+    expect(r.dailyNightCovered).toBeCloseTo(night, 9);
+    expect(r.dailyBatteryLoss).toBeCloseTo(night / 0.9 - night, 9);
+    expect(r.dailyRemainingNight).toBeCloseTo(0, 9);
   });
 
   it("still balances: production = self + charged + exported", () => {
@@ -308,16 +268,14 @@ describe("rule 5 — battery round-trip losses", () => {
     const r = run({ billAmount: 281, days: 30, batteryEfficiency: 0 });
     expect(r.dailyBatteryCharge).toBe(0);
     expect(r.savingsBattery).toBe(0);
-    // All the spare solar is exported, exactly as with no battery at all.
-    const none = run({ billAmount: 281, days: 30, batteryCapacity: 0 });
-    expect(r.dailyExported).toBeCloseTo(none.dailyExported, 9);
+    expect(r.dailyExported).toBeCloseTo(17.5, 9);
   });
 
   it("losses cost the customer real money", () => {
     const lossless = run({ billAmount: 281, days: 30, batteryEfficiency: 100 });
     const real = run({ billAmount: 281, days: 30, batteryEfficiency: DEFAULT_BATTERY_EFFICIENCY });
-    // A lossy battery has to draw more solar to deliver the same evening, so
-    // less is left to export — and it delivers less besides.
+    // Same evening covered, but more solar drawn to do it — so less exported.
+    expect(real.nightCoveredByBattery).toBeCloseTo(lossless.nightCoveredByBattery, 6);
     expect(real.batteryLoss).toBeGreaterThan(0);
     expect(real.exported).toBeLessThan(lossless.exported);
     expect(real.totalSavings).toBeLessThan(lossless.totalSavings);
@@ -379,7 +337,7 @@ describe("edge cases", () => {
     const r = run({ billAmount: 281, days: 30, batteryCapacity: 0 });
     expect(r.savingsBattery).toBe(0);
     expect(r.remainingNightUsage).toBeCloseTo(310, 6);
-    expect(r.dailyExported).toBeCloseTo(19.1303, 3);
+    expect(r.dailyExported).toBeCloseTo(17.5, 9);
   });
 });
 
