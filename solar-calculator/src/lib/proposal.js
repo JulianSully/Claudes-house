@@ -41,6 +41,7 @@ export function buildProposal(q, { now = new Date() } = {}) {
       // image it costs the share link almost nothing.
       arrays: q.arrays ?? [],
       notes: q.notes ?? [],
+      panelWidth: numeric(q.panelWidth) || undefined,
     },
 
     system: {

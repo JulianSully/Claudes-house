@@ -1,38 +1,35 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
-  MousePointer2,
   Grid3x3,
   MessageSquarePlus,
   Trash2,
-  RotateCw,
+  Copy,
+  Undo2,
   Sun,
   Info,
 } from "lucide-react";
 
 import DesignCanvas from "./DesignCanvas";
 import {
-  makeArray,
   makeNote,
-  arraySize,
   panelCount,
   layoutKw,
   keepOnCanvas,
   updateItem,
   removeItem,
+  duplicateArray,
   DEFAULT_PANEL_WIDTH,
 } from "./layout";
 import { Panel, InputRow } from "../components/ui";
 import { kw } from "../lib/format";
 
-const TOOLS = [
-  { value: "select", label: "Select", icon: MousePointer2, hint: "Move and edit" },
-  { value: "array", label: "Panels", icon: Grid3x3, hint: "Click the roof to drop an array" },
-  { value: "note", label: "Note", icon: MessageSquarePlus, hint: "Click to place a label" },
-];
-
 /**
- * The design screen: lay panels on the roof, label anything worth calling out,
- * and let the panel count set the system size.
+ * The design screen.
+ *
+ * Almost everything happens on the canvas now — drag to draw, handles to size
+ * and rotate, keys to nudge and delete. What is left here is what genuinely
+ * belongs beside the roof rather than on it: the running kW, the panel spec,
+ * and the site scale.
  */
 export default function DesignStage({ q }) {
   const {
@@ -40,85 +37,85 @@ export default function DesignStage({ q }) {
     arrays, setArrays,
     notes, setNotes,
     panelWatts, setPanelWatts,
+    panelWidth, setPanelWidth,
     systemSizeKw,
   } = q;
 
-  const [tool, setTool] = useState("select");
   const [selectedId, setSelectedId] = useState(null);
+  const history = useRef([]);
 
-  const selectedArray = arrays.find((a) => a.id === selectedId) ?? null;
-  const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
+  const remember = useCallback(() => {
+    history.current = [...history.current.slice(-24), { arrays, notes }];
+  }, [arrays, notes]);
 
-  const placeAt = (point) => {
-    if (tool === "array") {
-      // Dropped centred on the click, which is where the eye expects it.
-      const draft = makeArray({ x: point.x, y: point.y, panelWidth: DEFAULT_PANEL_WIDTH });
-      const { width, height } = arraySize(draft);
-      const placed = keepOnCanvas(
-        { ...draft, x: point.x - width / 2, y: point.y - height / 2 },
-        imageAspect
-      );
-      setArrays([...arrays, placed]);
-      setSelectedId(placed.id);
-    } else if (tool === "note") {
-      const note = makeNote({ x: point.x, y: point.y, text: "New note" });
-      setNotes([...notes, note]);
-      setSelectedId(note.id);
-    }
-    setTool("select"); // one placement per click, then back to moving things
+  const undo = () => {
+    const previous = history.current.pop();
+    if (!previous) return;
+    setArrays(previous.arrays);
+    setNotes(previous.notes);
+    setSelectedId(null);
   };
 
-  const moveItem = (id, patch) => {
+  const selected = arrays.find((a) => a.id === selectedId) ?? null;
+  const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
+
+  const createArray = (array) => {
+    remember();
+    setArrays([...arrays, keepOnCanvas(array, imageAspect, panelWidth)]);
+    setSelectedId(array.id);
+  };
+
+  const changeItem = (id, patch) => {
     if (arrays.some((a) => a.id === id)) {
-      setArrays(updateItem(arrays, id, patch).map((a) => keepOnCanvas(a, imageAspect)));
+      setArrays(updateItem(arrays, id, patch).map((a) => keepOnCanvas(a, imageAspect, panelWidth)));
     } else {
       setNotes(updateItem(notes, id, patch));
     }
   };
 
-  const patchArray = (patch) => setArrays(updateItem(arrays, selectedId, patch));
-
-  const deleteSelected = () => {
-    if (selectedArray) setArrays(removeItem(arrays, selectedId));
-    if (selectedNote) setNotes(removeItem(notes, selectedId));
+  const deleteItem = (id) => {
+    remember();
+    if (arrays.some((a) => a.id === id)) setArrays(removeItem(arrays, id));
+    else setNotes(removeItem(notes, id));
     setSelectedId(null);
+  };
+
+  const duplicate = () => {
+    if (!selected) return;
+    remember();
+    const copy = duplicateArray(selected);
+    setArrays([...arrays, copy]);
+    setSelectedId(copy.id);
+  };
+
+  const addNote = () => {
+    remember();
+    // Dropped centre-ish so it is never placed off screen, then dragged.
+    const note = makeNote({ x: 380, y: 240, text: "New note" });
+    setNotes([...notes, note]);
+    setSelectedId(note.id);
   };
 
   const total = panelCount(arrays);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-      {/* ---------- tools & properties ---------- */}
-      <aside className="w-full shrink-0 border-b border-slate-200 bg-white lg:w-[340px] lg:overflow-y-auto lg:border-b-0 lg:border-r">
-        <Panel title="Tools" icon={Grid3x3}>
-          <div className="grid grid-cols-3 gap-2">
-            {TOOLS.map(({ value, label, icon: Icon }) => {
-              const active = tool === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setTool(value)}
-                  aria-pressed={active}
-                  className={`flex flex-col items-center gap-1.5 rounded-lg border py-2.5 text-[12px] font-medium transition ${
-                    active
-                      ? "border-brand-500 bg-brand-50 text-brand-700"
-                      : "border-slate-300 text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  <Icon size={16} />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-          <p className="flex items-start gap-1.5 pt-1 text-[11.5px] leading-relaxed text-slate-500">
-            <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
-            {TOOLS.find((t) => t.value === tool)?.hint}. Drag anything to move it.
-          </p>
-        </Panel>
-
-        <Panel title="System from this layout" icon={Sun}>
+      <aside className="w-full shrink-0 border-b border-slate-200 bg-white lg:w-[320px] lg:overflow-y-auto lg:border-b-0 lg:border-r">
+        <Panel
+          title="System from this layout"
+          icon={Sun}
+          action={
+            history.current.length > 0 && (
+              <button
+                type="button"
+                onClick={undo}
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-slate-500 transition hover:bg-slate-100"
+              >
+                <Undo2 size={12} /> Undo
+              </button>
+            )
+          }
+        >
           <div className="rounded-lg bg-slate-50 px-3 py-3">
             <div className="flex items-baseline justify-between">
               <span className="text-[13px] text-slate-600">
@@ -129,17 +126,9 @@ export default function DesignStage({ q }) {
               </span>
             </div>
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-500">
-              {total > 0 ? (
-                <>
-                  This is the system size the quote uses — placing panels here overrides
-                  the figure on the Energy tab.
-                </>
-              ) : (
-                <>
-                  Nothing placed yet, so the quote uses the {kw(systemSizeKw)} typed on the
-                  Energy tab.
-                </>
-              )}
+              {total > 0
+                ? "This is the size the quote uses — it overrides the Energy tab."
+                : `Nothing placed yet, so the quote uses the ${kw(systemSizeKw)} on the Energy tab.`}
             </p>
           </div>
           <InputRow
@@ -152,105 +141,56 @@ export default function DesignStage({ q }) {
           />
         </Panel>
 
-        {selectedArray && (
-          <Panel
-            title="Selected array"
-            icon={Grid3x3}
-            action={
-              <button
-                type="button"
-                onClick={deleteSelected}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-red-600 transition hover:bg-red-50"
-              >
-                <Trash2 size={12} /> Delete
-              </button>
-            }
+        <Panel title="Scale" icon={Grid3x3}>
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[13px] text-slate-600">
+              <span>Panel size on the photo</span>
+              <span className="font-mono text-[12px] text-slate-500">{Math.round(panelWidth)}</span>
+            </div>
+            <input
+              type="range"
+              min="14"
+              max="110"
+              value={panelWidth}
+              onChange={(e) => setPanelWidth(Number(e.target.value))}
+              aria-label="Panel size on the photo"
+              className="w-full accent-brand-600"
+            />
+            <p className="mt-1 text-[11.5px] leading-relaxed text-slate-400">
+              Set once so a panel matches the roof in the photo. Every array uses it —
+              real panels are all the same size. Doesn't change the system size.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={addNote}
+            className="mt-1 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-slate-300 py-2 text-[12.5px] font-medium text-slate-700 transition hover:bg-slate-50"
           >
-            <InputRow
-              label="Across"
-              hint="panels wide"
-              unit=""
-              value={selectedArray.cols}
-              onChange={(v) => patchArray({ cols: Math.max(1, Math.min(40, Math.round(v || 1))) })}
-              step="1"
-              min="1"
-            />
-            <InputRow
-              label="Down"
-              hint="panels deep"
-              unit=""
-              value={selectedArray.rows}
-              onChange={(v) => patchArray({ rows: Math.max(1, Math.min(40, Math.round(v || 1))) })}
-              step="1"
-              min="1"
-            />
-            <div>
-              <div className="mb-1 flex items-center justify-between text-[13px] text-slate-600">
-                <span className="inline-flex items-center gap-1.5">
-                  <RotateCw size={13} /> Angle
-                </span>
-                <span className="font-mono text-[12px] text-slate-500">
-                  {Math.round(selectedArray.rotation)}°
-                </span>
-              </div>
-              <input
-                type="range"
-                min="-90"
-                max="90"
-                value={selectedArray.rotation}
-                onChange={(e) => patchArray({ rotation: Number(e.target.value) })}
-                aria-label="Array angle"
-                className="w-full accent-brand-600"
-              />
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-[13px] text-slate-600">
-                <span>Panel size on the photo</span>
-                <span className="font-mono text-[12px] text-slate-500">
-                  {Math.round(selectedArray.panelWidth)}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="16"
-                max="120"
-                value={selectedArray.panelWidth}
-                onChange={(e) => patchArray({ panelWidth: Number(e.target.value) })}
-                aria-label="Panel size on the photo"
-                className="w-full accent-brand-600"
-              />
-              <p className="mt-1 text-[11.5px] leading-relaxed text-slate-400">
-                Scale the panels to match the roof in the photo. Doesn't change the system
-                size — only how it looks.
-              </p>
-            </div>
-          </Panel>
-        )}
+            <MessageSquarePlus size={13} /> Add a label
+          </button>
+        </Panel>
 
         {selectedNote && (
           <Panel
-            title="Selected note"
+            title="Selected label"
             icon={MessageSquarePlus}
             action={
               <button
                 type="button"
-                onClick={deleteSelected}
+                onClick={() => deleteItem(selectedNote.id)}
                 className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-red-600 transition hover:bg-red-50"
               >
                 <Trash2 size={12} /> Delete
               </button>
             }
           >
-            <label className="block">
-              <span className="mb-1 block text-[13px] text-slate-600">Label</span>
-              <input
-                type="text"
-                value={selectedNote.text}
-                onChange={(e) => setNotes(updateItem(notes, selectedId, { text: e.target.value }))}
-                placeholder="e.g. switchboard, or shading from the gum"
-                className="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
-              />
-            </label>
+            <input
+              type="text"
+              value={selectedNote.text}
+              onChange={(e) => setNotes(updateItem(notes, selectedNote.id, { text: e.target.value }))}
+              placeholder="e.g. switchboard"
+              className="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
+            />
           </Panel>
         )}
 
@@ -280,21 +220,58 @@ export default function DesignStage({ q }) {
         )}
       </aside>
 
-      {/* ---------- canvas ---------- */}
       <main className="min-w-0 flex-1 lg:overflow-y-auto">
         <div className="mx-auto max-w-[1100px] p-5 lg:p-6">
+          {/* Contextual bar — only what applies to what's selected. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <p className="text-[12.5px] text-slate-600">
+              {selected ? (
+                <>
+                  <strong className="font-semibold text-slate-800">
+                    {selected.cols} × {selected.rows} = {selected.cols * selected.rows} panels
+                  </strong>{" "}
+                  at {Math.round(selected.rotation)}° — drag the corner to resize, the top
+                  knob to rotate
+                </>
+              ) : (
+                <>Drag anywhere on the roof to lay panels. Scroll to zoom, alt-drag to pan.</>
+              )}
+            </p>
+            {selected && (
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={duplicate}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-[12px] font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  <Copy size={12} /> Duplicate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteItem(selected.id)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-2.5 py-1.5 text-[12px] font-medium text-red-600 transition hover:bg-red-50"
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+              </div>
+            )}
+          </div>
+
           <DesignCanvas
             imageSrc={siteImage?.src ?? null}
             aspect={imageAspect}
             arrays={arrays}
             notes={notes}
+            panelWidth={panelWidth}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            onChange={moveItem}
-            tool={tool}
-            onCanvasClick={placeAt}
+            onChange={changeItem}
+            onCreate={createArray}
+            onDelete={deleteItem}
           />
-          <p className="mt-3 text-[11.5px] leading-relaxed text-slate-500">
+
+          <p className="mt-3 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-slate-500">
+            <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
             A visual layout for the proposal, not an engineering drawing — no shading
             study, no string design, no roof measurements. Its one real job is the panel
             count, which sets the system size on the quote.

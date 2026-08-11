@@ -30,7 +30,7 @@ export const viewBoxHeight = (aspect) =>
 let seq = 0;
 const nextId = (prefix) => `${prefix}-${Date.now().toString(36)}-${(seq += 1)}`;
 
-export function makeArray({ x, y, cols = 4, rows = 2, panelWidth = DEFAULT_PANEL_WIDTH }) {
+export function makeArray({ x, y, cols = 4, rows = 2, rotation = 0 }) {
   return {
     id: nextId("arr"),
     kind: "array",
@@ -38,10 +38,16 @@ export function makeArray({ x, y, cols = 4, rows = 2, panelWidth = DEFAULT_PANEL
     y,
     cols: clampCount(cols),
     rows: clampCount(rows),
-    rotation: 0,
-    panelWidth,
+    rotation,
   };
 }
+
+export const duplicateArray = (a, offset = 14) => ({
+  ...a,
+  id: nextId("arr"),
+  x: a.x + offset,
+  y: a.y + offset,
+});
 
 export function makeNote({ x, y, text = "" }) {
   return { id: nextId("note"), kind: "note", x, y, text };
@@ -49,9 +55,15 @@ export function makeNote({ x, y, text = "" }) {
 
 const clampCount = (n) => Math.max(1, Math.min(40, Math.round(Number(n) || 1)));
 
-/** Overall footprint of an array in viewBox units, gaps included. */
-export function arraySize(a) {
-  const pw = a.panelWidth;
+/**
+ * Overall footprint of an array in viewBox units, gaps included.
+ *
+ * Panel width is a property of the SITE, not of each array — every panel on a
+ * job is the same physical size, so scaling one array and not another would be
+ * drawing a lie. It is passed in rather than stored per array.
+ */
+export function arraySize(a, panelWidth = DEFAULT_PANEL_WIDTH) {
+  const pw = a.panelWidth ?? panelWidth; // tolerate layouts saved before the move
   const ph = pw * PANEL_ASPECT;
   return {
     panelWidth: pw,
@@ -73,9 +85,9 @@ export const layoutKw = (arrays, watts = DEFAULT_PANEL_WATTS) =>
  * roof runs to the edge of the frame, so panels are allowed to overhang; this
  * only stops one being dragged completely out of sight.
  */
-export function keepOnCanvas(a, aspect) {
+export function keepOnCanvas(a, aspect, panelWidth) {
   const h = viewBoxHeight(aspect);
-  const { width, height } = arraySize(a);
+  const { width, height } = arraySize(a, panelWidth);
   return {
     ...a,
     x: Math.max(-width * 0.5, Math.min(VIEWBOX_WIDTH - width * 0.5, a.x)),
@@ -103,3 +115,75 @@ export function pointerToViewBox(svg, event) {
   const p = point.matrixTransform(ctm.inverse());
   return { x: p.x, y: p.y };
 }
+
+
+/* ------------------------------------------------------------------ *
+ * Geometry for direct manipulation — dragging handles on a rotated shape.
+ * ------------------------------------------------------------------ */
+
+const rotatePoint = (px, py, radians) => ({
+  x: px * Math.cos(radians) - py * Math.sin(radians),
+  y: px * Math.sin(radians) + py * Math.cos(radians),
+});
+
+/** Where a point in the array's own unrotated space lands on the canvas. */
+export function toWorld(a, panelWidth, localX, localY) {
+  const { width, height } = arraySize(a, panelWidth);
+  const rad = (a.rotation * Math.PI) / 180;
+  const centre = { x: a.x + width / 2, y: a.y + height / 2 };
+  const d = rotatePoint(localX - width / 2, localY - height / 2, rad);
+  return { x: centre.x + d.x, y: centre.y + d.y };
+}
+
+/** The inverse: a canvas point expressed in the array's own space. */
+export function toLocal(a, panelWidth, worldX, worldY) {
+  const { width, height } = arraySize(a, panelWidth);
+  const rad = (-a.rotation * Math.PI) / 180;
+  const centre = { x: a.x + width / 2, y: a.y + height / 2 };
+  const d = rotatePoint(worldX - centre.x, worldY - centre.y, rad);
+  return { x: d.x + width / 2, y: d.y + height / 2 };
+}
+
+/**
+ * How many whole panels fit in a dragged rectangle. At least one either way —
+ * a stray click should still leave a panel behind rather than nothing.
+ */
+export function fitPanels(width, height, panelWidth) {
+  const pw = panelWidth;
+  const ph = pw * PANEL_ASPECT;
+  return {
+    cols: clampCount(Math.max(1, Math.round((Math.abs(width) + PANEL_GAP) / (pw + PANEL_GAP)))),
+    rows: clampCount(Math.max(1, Math.round((Math.abs(height) + PANEL_GAP) / (ph + PANEL_GAP)))),
+  };
+}
+
+/**
+ * Resize an array by dragging its far corner, keeping the NEAR corner pinned.
+ * Without this the shape drifts under the cursor whenever it is rotated,
+ * because the rotation pivot is the centre and the centre moves as it grows.
+ */
+export function resizeFromCorner(a, panelWidth, localX, localY) {
+  const anchor = toWorld(a, panelWidth, 0, 0);
+  const { cols, rows } = fitPanels(localX, localY, panelWidth);
+  const next = { ...a, cols, rows };
+
+  const { width, height } = arraySize(next, panelWidth);
+  const rad = (next.rotation * Math.PI) / 180;
+  const d = rotatePoint(-width / 2, -height / 2, rad);
+  return { ...next, x: anchor.x - width / 2 - d.x, y: anchor.y - height / 2 - d.y };
+}
+
+/** Angle from an array's centre to a point, as a compass-style rotation. */
+export function angleTo(a, panelWidth, worldX, worldY) {
+  const { width, height } = arraySize(a, panelWidth);
+  const centre = { x: a.x + width / 2, y: a.y + height / 2 };
+  const deg = (Math.atan2(worldY - centre.y, worldX - centre.x) * 180) / Math.PI;
+  return deg + 90; // handle sits above the shape, so straight up is zero
+}
+
+export const normaliseAngle = (deg) => {
+  let d = deg % 360;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
+};

@@ -1,7 +1,13 @@
 import { useMemo, useState } from "react";
 
 import { buildProjection, DEFAULT_PRICE_RISE } from "../lib/projection";
-import { layoutKw, panelCount, DEFAULT_PANEL_WATTS, DEFAULT_ASPECT } from "../design/layout";
+import {
+  layoutKw,
+  panelCount,
+  DEFAULT_PANEL_WATTS,
+  DEFAULT_PANEL_WIDTH,
+  DEFAULT_ASPECT,
+} from "../design/layout";
 import {
   DEFAULT_CUSTOMER,
   DEFAULT_SITE_IMAGE,
@@ -42,6 +48,9 @@ export function useQuote() {
   const [arrays, setArrays] = useState([]);
   const [notes, setNotes] = useState([]);
   const [panelWatts, setPanelWatts] = useState(DEFAULT_PANEL_WATTS);
+  // Panel size on the photo is a property of the site, not of each array —
+  // every panel on a job is the same physical size.
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
 
   // Tariff
   const [supplyCharge, setSupplyCharge] = useState(1.1); // $/day
@@ -154,6 +163,7 @@ export function useQuote() {
     arrays, setArrays,
     notes, setNotes,
     panelWatts, setPanelWatts,
+    panelWidth, setPanelWidth,
     placedPanels, sizeFromLayout,
     // system
     systemSizeKw, setSystemSizeKw,

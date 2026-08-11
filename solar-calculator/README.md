@@ -109,55 +109,47 @@ knowing about before quoting.
 
 ## The design screen
 
-A flat 2D work surface over the site image: drop panel arrays on the roof, drag
-them into place, rotate them, and drop annotations wherever something needs
-calling out. Reached from the **Design** tab.
+Reached from the **Design** tab. A flat 2D work surface over the site image —
+flat deliberately, since a rep is placing panels on a roof they can see, not
+modelling a building.
 
-Flat and 2D deliberately — a rep is placing panels on a roof they can see, not
-modelling a building, and a surface that rotates in three axes makes that
-harder rather than easier.
+Direct manipulation throughout. An earlier version put every action in a side
+panel, which meant looking away from the roof to change anything:
 
-**The layout sets the system size.** 18 panels at 440 W is a 7.92 kW system, and
+| | |
+|---|---|
+| drag on empty canvas | draw an array, filled with whole panels, count previewed live |
+| drag an array | move it |
+| drag the corner handle | add or remove panels |
+| drag the top knob | rotate (hold Shift to snap to 15°) |
+| wheel | zoom about the cursor |
+| alt-drag, middle-drag, space-drag | pan |
+| arrows | nudge, Shift for a bigger step |
+| Delete / Backspace | remove |
+| Escape | deselect |
+
+Plus Duplicate and Undo. What is left in the side panel is only what genuinely
+belongs beside the roof rather than on it: the running kW, panel wattage, and
+the site scale.
+
+**Panel size is a property of the site, not of each array.** Every panel on a
+job is the same physical size, so scaling one array and not another would be
+drawing a lie. Set it once to match the roof in the photo.
+
+**The layout sets the system size.** 15 panels at 440 W is a 6.6 kW system, and
 the Energy tab's size field goes read-only saying where the number came from.
-That is the screen's one real job: without it the layout would be decoration and
-the rep would still be typing a size by hand.
+That is the screen's one real job: without it the layout would be decoration
+and the rep would still be typing a size by hand.
 
-Everything lives in the viewBox units of an SVG laid over the image — 1000 wide,
-and however tall the image's aspect ratio makes it. One uniform coordinate
-system means rotation behaves, drag maths stays simple, and the same markup
-scales into the customer's proposal and the PDF, where it renders read-only.
+The image lives *inside* the SVG, so zoom and pan are one viewBox change rather
+than two coordinate systems kept in step. Handles are scaled by the zoom factor
+so they stay the same size on screen at any magnification. The rotate and
+resize maths is pinned by tests — `resizeFromCorner` keeps the near corner
+anchored, without which a rotated array slides out from under the cursor as it
+grows.
 
 What it is not: no shading study, no string design, no roof measurement, no
 panel-level production. Anything claiming those would need a real site survey.
-
-## Finding the property
-
-Type an address, pick it from the suggestions, and the aerial view drops in on
-its own. `lib/addressSearch.js` + `components/AddressSearch.jsx`.
-
-Underneath it stays a plain text input: a rep can type an address no provider
-knows — a new estate, a rural property — and the quote still works. The
-suggestions are an accelerator, never a gate. Debounced at 280 ms, in-flight
-requests aborted on the next keystroke, full keyboard support, wired as a
-combobox.
-
-**Providers** (set `VITE_MAP_KEY`, and `VITE_MAP_PROVIDER` to pick one):
-
-- **google** (default) — Places Autocomplete (New) for suggestions, then a Place
-  lookup for coordinates, then Static Maps for the image. Best Australian
-  address coverage. Enable Places API (New) + Maps Static API on the key.
-- **mapbox** — Geocoding v5 returns coordinates with the suggestion, so it needs
-  one request instead of two, then Static Images for the tile.
-
-**Without a key** the field offers a short built-in list of sample addresses
-under an amber "Sample addresses" banner. It exists so the flow can be
-demonstrated, and it never pretends to have found a real property: picking one
-fills the address and still asks for a photo. Inventing aerial imagery for a
-real street would be worse than admitting there is none.
-
-A browser-visible key is unavoidable for this. Restrict it by HTTP referrer in
-the provider's console, and don't reuse a key that has billing-heavy APIs
-enabled.
 
 ## The house image
 

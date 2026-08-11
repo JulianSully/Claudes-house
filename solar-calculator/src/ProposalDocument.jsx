@@ -108,11 +108,10 @@ export default function ProposalDocument({ proposal: p }) {
               aspect={p.site.imageAspect}
               arrays={p.site.arrays}
               notes={p.site.notes}
+              panelWidth={p.site.panelWidth}
               selectedId={null}
               onSelect={() => {}}
               onChange={() => {}}
-              tool="select"
-              onCanvasClick={() => {}}
               readOnly
             />
           ) : (
