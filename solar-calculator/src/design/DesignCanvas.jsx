@@ -13,7 +13,6 @@ import {
   normaliseAngle,
   fitPanels,
   makeArray,
-  PANEL_GAP,
   DEFAULT_PANEL_WIDTH,
 } from "./layout";
 
@@ -50,11 +49,17 @@ export default function DesignCanvas({
   onCreate, // (array)
   onDelete,
   readOnly = false,
+  // Setting the scale: while `calibrating`, a drag draws a measuring line
+  // instead of an array, and its endpoints come back through `onCalibrated`.
+  calibrating = false,
+  onCalibrated,
+  metresPerUnit = null,
 }) {
   const svgRef = useRef(null);
   const gesture = useRef(null);
   const [, forceRender] = useState(0);
   const [draft, setDraft] = useState(null); // rectangle being dragged out
+  const [ruler, setRuler] = useState(null); // measuring line, while calibrating
   const [spaceHeld, setSpaceHeld] = useState(false);
 
   // One object describing how a panel is drawn, passed to every geometry call.
@@ -70,6 +75,12 @@ export default function DesignCanvas({
   );
   const [view, setView] = useState(fullView);
   useEffect(() => setView(fullView), [fullView]);
+
+  // The line stays on screen while the rep types how long it is, and clears
+  // the moment they finish or back out.
+  useEffect(() => {
+    if (!calibrating) setRuler(null);
+  }, [calibrating]);
 
   const selected = arrays.find((a) => a.id === selectedId) ?? null;
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
@@ -94,6 +105,10 @@ export default function DesignCanvas({
         setDraft({ x0: g.start.x, y0: g.start.y, x1: p.x, y1: p.y });
         return;
       }
+      if (g.type === "measure") {
+        setRuler({ x0: g.start.x, y0: g.start.y, x1: p.x, y1: p.y });
+        return;
+      }
       if (g.type === "move") {
         onChange(g.id, { x: p.x - g.dx, y: p.y - g.dy });
         return;
@@ -115,6 +130,19 @@ export default function DesignCanvas({
       gesture.current = null;
       if (!g) return;
 
+      if (g.type === "measure") {
+        const p = pointerToViewBox(svgRef.current, e);
+        const line = { x0: g.start.x, y0: g.start.y, x1: p.x, y1: p.y };
+        // A tap is not a measurement — leave the mode running so the rep can
+        // just try again rather than being bounced out of it.
+        if (Math.hypot(p.x - g.start.x, p.y - g.start.y) < 3) {
+          setRuler(null);
+          return;
+        }
+        setRuler(line);
+        onCalibrated?.(line);
+        return;
+      }
       if (g.type === "draw") {
         const p = pointerToViewBox(svgRef.current, e);
         const w = Math.abs(p.x - g.start.x);
@@ -149,7 +177,7 @@ export default function DesignCanvas({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
     };
-  }, [onChange, onCreate, onSelect, spec, readOnly]);
+  }, [onChange, onCreate, onSelect, onCalibrated, spec, readOnly]);
 
   /* ---------------- keyboard ---------------- */
 
@@ -227,6 +255,13 @@ export default function DesignCanvas({
   const onCanvasPointerDown = (e) => {
     if (readOnly) return;
     const p = pointerToViewBox(svgRef.current, e);
+
+    if (calibrating) {
+      gesture.current = { type: "measure", start: p };
+      setRuler({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+      return;
+    }
+
     const panning = spaceHeld || e.button === 1 || e.altKey;
 
     if (panning) {
@@ -262,7 +297,7 @@ export default function DesignCanvas({
         style={{
           aspectRatio: `${VIEWBOX_WIDTH} / ${worldHeight}`,
           touchAction: "none",
-          cursor: readOnly ? "default" : spaceHeld ? "grab" : "crosshair",
+          cursor: readOnly ? "default" : spaceHeld && !calibrating ? "grab" : "crosshair",
         }}
         onPointerDown={onCanvasPointerDown}
       >
@@ -291,11 +326,15 @@ export default function DesignCanvas({
           </>
         )}
 
+        {/* While measuring, the roof underneath has to be reachable — a drag
+            that starts on a panel is still a measurement, not a move. */}
+        <g pointerEvents={calibrating ? "none" : "auto"}>
         {arrays.map((a) => (
           <PanelArray
             key={a.id}
             array={a}
             spec={spec}
+            scale={scale}
             selected={a.id === selectedId}
             readOnly={readOnly}
             onPointerDown={(e) => startMove(e, a)}
@@ -312,10 +351,12 @@ export default function DesignCanvas({
             onPointerDown={(e) => startMove(e, n)}
           />
         ))}
+        </g>
 
         {draft && <DraftRect draft={draft} spec={spec} scale={scale} />}
+        {ruler && <Ruler line={ruler} scale={scale} metresPerUnit={metresPerUnit} />}
 
-        {selected && !readOnly && (
+        {selected && !readOnly && !calibrating && (
           <Handles
             array={selected}
             spec={spec}
@@ -325,6 +366,8 @@ export default function DesignCanvas({
           />
         )}
       </svg>
+
+      {metresPerUnit > 0 && <ScaleBar viewWidth={view.w} metresPerUnit={metresPerUnit} />}
 
       {!readOnly && (
         <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg bg-ink-900/85 p-1 text-white backdrop-blur">
@@ -361,8 +404,15 @@ function ZoomButton({ children, label, onClick }) {
   );
 }
 
-function PanelArray({ array: a, spec, selected, readOnly, onPointerDown }) {
-  const { panelWidth: pw, panelHeight: ph, width, height } = arraySize(a, spec);
+function PanelArray({ array: a, spec, scale = 1, selected, readOnly, onPointerDown }) {
+  const { panelWidth: pw, panelHeight: ph, gap, width, height } = arraySize(a, spec);
+
+  // Once panels draw at true size they can be a fifth of their old width, so
+  // outlines and corner radii are taken off the panel rather than fixed —
+  // a 0.7-unit stroke that reads as a hairline on a big panel becomes a thick
+  // border on a small one.
+  const line = Math.max(0.2, Math.min(0.7, pw * 0.017));
+  const radius = Math.max(0.3, Math.min(1, pw * 0.025));
 
   const panels = [];
   for (let r = 0; r < a.rows; r += 1) {
@@ -370,19 +420,22 @@ function PanelArray({ array: a, spec, selected, readOnly, onPointerDown }) {
       panels.push(
         <rect
           key={`${r}-${c}`}
-          x={c * (pw + PANEL_GAP)}
-          y={r * (ph + PANEL_GAP)}
+          x={c * (pw + gap)}
+          y={r * (ph + gap)}
           width={pw}
           height={ph}
-          rx="1"
+          rx={radius}
           fill="#0F2744"
           fillOpacity="0.9"
           stroke="#7DD3FC"
-          strokeWidth="0.7"
+          strokeWidth={line}
         />
       );
     }
   }
+
+  const pad = gap * 0.75;
+  const halo = 2 * scale; // selection ring stays the same thickness on screen
 
   return (
     <g
@@ -390,18 +443,26 @@ function PanelArray({ array: a, spec, selected, readOnly, onPointerDown }) {
       onPointerDown={onPointerDown}
       style={{ cursor: readOnly ? "default" : "move" }}
     >
-      <rect x={-1.5} y={-1.5} width={width + 3} height={height + 3} rx="1.5" fill="#000" fillOpacity="0.3" />
+      <rect
+        x={-pad}
+        y={-pad}
+        width={width + pad * 2}
+        height={height + pad * 2}
+        rx={pad}
+        fill="#000"
+        fillOpacity="0.3"
+      />
       {panels}
       {selected && !readOnly && (
         <rect
-          x={-2}
-          y={-2}
-          width={width + 4}
-          height={height + 4}
-          rx="2"
+          x={-halo}
+          y={-halo}
+          width={width + halo * 2}
+          height={height + halo * 2}
+          rx={halo}
           fill="none"
           stroke="#3163F5"
-          strokeWidth="2"
+          strokeWidth={halo}
         />
       )}
     </g>
@@ -470,6 +531,94 @@ function DraftRect({ draft, spec, scale }) {
         {cols} × {rows} = {cols * rows}
       </text>
     </g>
+  );
+}
+
+/**
+ * The measuring line, drawn across something of known length. Shows what it
+ * currently thinks that distance is, so a second calibration on an already-
+ * scaled photo is a sanity check as much as a correction.
+ */
+function Ruler({ line, scale, metresPerUnit }) {
+  const units = Math.hypot(line.x1 - line.x0, line.y1 - line.y0);
+  const mid = { x: (line.x0 + line.x1) / 2, y: (line.y0 + line.y1) / 2 };
+  const label = metresPerUnit > 0 ? `${(units * metresPerUnit).toFixed(1)} m` : "how long?";
+  const w = 58 * scale;
+
+  return (
+    <g pointerEvents="none">
+      <line
+        x1={line.x0}
+        y1={line.y0}
+        x2={line.x1}
+        y2={line.y1}
+        stroke="#FBBF24"
+        strokeWidth={2 * scale}
+        strokeLinecap="round"
+      />
+      {[
+        [line.x0, line.y0],
+        [line.x1, line.y1],
+      ].map(([cx, cy], i) => (
+        <circle key={i} cx={cx} cy={cy} r={3.5 * scale} fill="#FBBF24" stroke="#0B1220" strokeWidth={scale} />
+      ))}
+      <rect
+        x={mid.x - w / 2}
+        y={mid.y - 9 * scale}
+        width={w}
+        height={17 * scale}
+        rx={3 * scale}
+        fill="#0B1220"
+        fillOpacity="0.9"
+      />
+      <text
+        x={mid.x}
+        y={mid.y + 3.5 * scale}
+        textAnchor="middle"
+        fontSize={11 * scale}
+        fill="#FDE68A"
+        fontFamily="ui-monospace, monospace"
+      >
+        {label}
+      </text>
+    </g>
+  );
+}
+
+/** Rounded distances a scale bar is willing to show. */
+const BAR_METRES = [1, 2, 5, 10, 20, 50, 100, 200];
+
+/**
+ * The corner scale bar — the plain proof that the drawing is to scale. Sized
+ * against the current view, so it stays honest through zooming and panning.
+ */
+function ScaleBar({ viewWidth, metresPerUnit }) {
+  const across = viewWidth * metresPerUnit; // metres visible right now
+  // Widest round distance that still leaves the bar under a third of the frame.
+  const metres = [...BAR_METRES].reverse().find((m) => m <= across / 3) ?? BAR_METRES[0];
+  const width = (metres / across) * 100;
+
+  // Top left rather than the cartographic convention of bottom left: aerials
+  // carry their provider's watermark and coordinates along the bottom edge, and
+  // a scale bar sitting in that is unreadable.
+  //
+  // The percentage resolves against the full canvas width, so the inset is a
+  // margin rather than padding — otherwise the bar would quietly read long.
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-3">
+      <div style={{ width: `${width}%`, marginLeft: 12, minWidth: 40 }}>
+        <div
+          className="h-[6px] border-x-2 border-b-2 border-white/90"
+          style={{ filter: "drop-shadow(0 1px 1.5px rgba(0,0,0,0.9))" }}
+        />
+        <div
+          className="pt-1 font-mono text-[10.5px] font-medium leading-none text-white"
+          style={{ textShadow: "0 1px 3px rgba(0,0,0,0.95)" }}
+        >
+          {metres} m
+        </div>
+      </div>
+    </div>
   );
 }
 

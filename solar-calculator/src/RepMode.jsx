@@ -76,7 +76,7 @@ export default function RepMode({ q, modeToggle }) {
     sunHours, setSunHours, productionFactor,
     customerName, setCustomerName,
     address, setAddress,
-    siteImage, setSiteImage, setImageAspect, coords, setCoords,
+    siteImage, setSiteImage, setImageAspect, coords, setCoords, setSiteScale,
     placedPanels, sizeFromLayout,
     days, periodWord, periodShort,
     results, economics, derived, hasBattery,
@@ -196,6 +196,7 @@ export default function RepMode({ q, modeToggle }) {
               setImageAspect={setImageAspect}
               coords={coords}
               setCoords={setCoords}
+              setSiteScale={setSiteScale}
               systemSizeKw={systemSizeKw}
               batteryCapacity={batteryCapacity}
             />

@@ -48,11 +48,36 @@ export const satelliteConfig = () => ({
 export const satelliteAvailable = () => Boolean(satelliteConfig().key);
 
 /**
+ * How the aerial is requested. Exported because the design canvas needs these
+ * exact numbers to work out the scale of the tile: Web Mercator imagery has a
+ * known ground resolution at a given zoom and latitude, so a fetched aerial
+ * knows how many metres wide it is and can draw panels at true size.
+ *
+ * Zoom 20 puts roughly 120 m across the frame at Australian latitudes — the
+ * house and its neighbours, which is what a rep wants to see. Zoom 19 was
+ * double that and left the roof too small to lay panels on.
+ *
+ * `width` is what we ask for in CSS pixels. The `scale=2` / `@2x` retina flag
+ * returns twice the pixels covering the SAME ground, so it must never enter
+ * the scale calculation.
+ */
+export const SATELLITE_VIEW = { width: 900, height: 500, zoom: 20 };
+
+/**
  * Build a satellite image URL for an address, or null when it can't be done —
  * no key configured, no address typed, or a provider that needs coordinates
  * we don't have. Callers fall back to upload.
  */
-export function satelliteUrlFor(address, { width = 900, height = 500, zoom = 19, lat, lng } = {}) {
+export function satelliteUrlFor(
+  address,
+  {
+    width = SATELLITE_VIEW.width,
+    height = SATELLITE_VIEW.height,
+    zoom = SATELLITE_VIEW.zoom,
+    lat,
+    lng,
+  } = {}
+) {
   const { provider, key } = satelliteConfig();
   const trimmed = (address || "").trim();
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);

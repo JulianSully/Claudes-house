@@ -19,7 +19,23 @@ export const DEFAULT_PANEL_WATTS = 440;
 export const PANEL_ASPECT = 0.64;
 
 export const DEFAULT_PANEL_WIDTH = 46; // viewBox units
-export const PANEL_GAP = 2; // a visible seam between panels, as installers leave
+export const PANEL_GAP = 2; // the seam at the reference panel size
+
+/**
+ * The seam between panels, in viewBox units.
+ *
+ * It has to shrink with the panels. Once the canvas knows its real scale a
+ * panel might only be 20 units long, and a fixed 2-unit seam would then be a
+ * 20 cm gap between modules — visible on the drawing and wrong on the roof.
+ * Five percent of the long edge is roughly a rail spacing, and it never
+ * collapses to nothing, so the grid still reads as separate panels when zoomed
+ * right out.
+ */
+export const gapFor = (longSide) => {
+  const s = Number(longSide);
+  if (!Number.isFinite(s) || s <= 0) return PANEL_GAP;
+  return Math.max(0.15, Math.min(PANEL_GAP, s * 0.05));
+};
 
 export const VIEWBOX_WIDTH = 1000;
 export const DEFAULT_ASPECT = 16 / 9;
@@ -73,12 +89,14 @@ export function arraySize(a, spec = {}) {
   const portrait = (a.orientation ?? s.orientation ?? "landscape") === "portrait";
   const pw = portrait ? longSide * ratio : longSide;
   const ph = portrait ? longSide : longSide * ratio;
+  const gap = gapFor(longSide);
 
   return {
     panelWidth: pw,
     panelHeight: ph,
-    width: a.cols * pw + (a.cols - 1) * PANEL_GAP,
-    height: a.rows * ph + (a.rows - 1) * PANEL_GAP,
+    gap,
+    width: a.cols * pw + (a.cols - 1) * gap,
+    height: a.rows * ph + (a.rows - 1) * gap,
   };
 }
 
@@ -164,9 +182,10 @@ export function fitPanels(width, height, spec = {}) {
   const portrait = (s.orientation ?? "landscape") === "portrait";
   const pw = portrait ? longSide * ratio : longSide;
   const ph = portrait ? longSide : longSide * ratio;
+  const gap = gapFor(longSide);
   return {
-    cols: clampCount(Math.max(1, Math.round((Math.abs(width) + PANEL_GAP) / (pw + PANEL_GAP)))),
-    rows: clampCount(Math.max(1, Math.round((Math.abs(height) + PANEL_GAP) / (ph + PANEL_GAP)))),
+    cols: clampCount(Math.max(1, Math.round((Math.abs(width) + gap) / (pw + gap)))),
+    rows: clampCount(Math.max(1, Math.round((Math.abs(height) + gap) / (ph + gap)))),
   };
 }
 

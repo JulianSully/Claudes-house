@@ -8,7 +8,9 @@ import {
   satelliteAvailable,
   readImageFile,
   tidyAddress,
+  SATELLITE_VIEW,
 } from "../lib/siteImage";
+import { scaleForStaticMap } from "../design/scale";
 
 /**
  * Address and a picture of the house, at the top of the rep's flow.
@@ -27,6 +29,7 @@ export default function SitePanel({
   setImageAspect,
   coords,
   setCoords,
+  setSiteScale,
   systemSizeKw,
   batteryCapacity,
 }) {
@@ -43,6 +46,10 @@ export default function SitePanel({
     try {
       const src = await readImageFile(file);
       setSiteImage({ src, kind: "upload" });
+      // A file carries no zoom level, so nothing here knows what it is worth in
+      // metres. Drop the old scale rather than draw panels to the last photo's
+      // scale on this one; the Design tab asks for one line to get it back.
+      setSiteScale?.(null);
     } catch (err) {
       setError(err.message);
     }
@@ -68,6 +75,15 @@ export default function SitePanel({
     const img = new Image();
     img.onload = () => {
       setSiteImage({ src: url, kind: "satellite" });
+      // We asked for this tile, so we know exactly what it covers — panels can
+      // now draw themselves at true size without anyone measuring anything.
+      setSiteScale?.(
+        scaleForStaticMap({
+          zoom: SATELLITE_VIEW.zoom,
+          latitude: lat ?? coords?.lat,
+          requestWidth: SATELLITE_VIEW.width,
+        })
+      );
       setLoading(false);
     };
     img.onerror = () => {
@@ -120,7 +136,10 @@ export default function SitePanel({
             </figcaption>
             <button
               type="button"
-              onClick={() => setSiteImage(null)}
+              onClick={() => {
+                setSiteImage(null);
+                setSiteScale?.(null);
+              }}
               title="Remove image"
               className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-ink-900/75 text-white transition hover:bg-ink-900"
             >

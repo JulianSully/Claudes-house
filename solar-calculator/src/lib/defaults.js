@@ -34,3 +34,17 @@ export const DEFAULT_SITE_IMAGE = `${import.meta.env?.BASE_URL ?? "/"}site-defau
 
 /** Aspect ratio of the bundled image, so the design canvas is right on load. */
 export const DEFAULT_SITE_ASPECT = 1720 / 1074;
+
+/**
+ * How much ground the sample image covers, in metres per viewBox unit — the
+ * canvas is 1000 units wide, so this frame is about 92 m across.
+ *
+ * It is an ESTIMATE — the file is a screenshot and carries no zoom level with
+ * it — but a checkable one: at this scale the panels drawn on the roof come out
+ * the same size as the real array already installed on the house at the top of
+ * the frame, and the street reads about 9 m kerb to kerb. An aerial fetched
+ * through the Aerial view button gets its scale computed exactly instead. If a
+ * panel still looks wrong here, redo the scale on the Design tab — one drag
+ * across the driveway fixes it.
+ */
+export const DEFAULT_SITE_SCALE = 0.092; // metres per viewBox unit

@@ -7,6 +7,9 @@ import {
   Undo2,
   Sun,
   Info,
+  Ruler,
+  Check,
+  X,
 } from "lucide-react";
 
 import DesignCanvas from "./DesignCanvas";
@@ -21,6 +24,7 @@ import {
   DEFAULT_PANEL_WIDTH,
 } from "./layout";
 import { PANELS, panelLabel, ORIENTATIONS } from "./panels";
+import { scaleFromCalibration, CALIBRATION_HINTS } from "./scale";
 import { Panel, InputRow, SelectRow, Segmented } from "../components/ui";
 import { kw } from "../lib/format";
 
@@ -39,6 +43,8 @@ export default function DesignStage({ q }) {
     notes, setNotes,
     panelWatts, setPanelWatts,
     panelWidth, setPanelWidth,
+    siteScale, setSiteScale, clearSiteScale, scaledToLife,
+    siteWidthMetres, panelLengthMetres,
     panelId, setPanelId, panelSpec, panelRatio,
     systemSizeKw,
   } = q;
@@ -49,6 +55,31 @@ export default function DesignStage({ q }) {
 
   const [selectedId, setSelectedId] = useState(null);
   const history = useRef([]);
+
+  // Setting the scale: drag a line across something of known length, type the
+  // metres. Two steps, and only ever needed for an uploaded photo — a fetched
+  // aerial arrives knowing its own scale.
+  const [calibrating, setCalibrating] = useState(false);
+  const [line, setLine] = useState(null);
+  const [metresText, setMetresText] = useState("");
+
+  const startCalibrating = () => {
+    setSelectedId(null);
+    setLine(null);
+    setMetresText("");
+    setCalibrating(true);
+  };
+  const stopCalibrating = () => {
+    setCalibrating(false);
+    setLine(null);
+  };
+  const applyScale = (metres) => {
+    const next = scaleFromCalibration({ ...line, metres });
+    if (next === null) return;
+    setSiteScale(next);
+    stopCalibrating();
+  };
+  const onCalibrated = useCallback((drawn) => setLine(drawn), []);
 
   const remember = useCallback(() => {
     history.current = [...history.current.slice(-24), { arrays, notes }];
@@ -171,26 +202,77 @@ export default function DesignStage({ q }) {
           />
         </Panel>
 
-        <Panel title="Scale" icon={Grid3x3}>
-          <div>
-            <div className="mb-1 flex items-center justify-between text-[13px] text-slate-600">
-              <span>Panel size on the photo</span>
-              <span className="font-mono text-[12px] text-slate-500">{Math.round(panelWidth)}</span>
-            </div>
-            <input
-              type="range"
-              min="14"
-              max="110"
-              value={panelWidth}
-              onChange={(e) => setPanelWidth(Number(e.target.value))}
-              aria-label="Panel size on the photo"
-              className="w-full accent-brand-600"
+        <Panel title="Scale" icon={Ruler}>
+          {calibrating ? (
+            <Calibrator
+              line={line}
+              metresText={metresText}
+              setMetresText={setMetresText}
+              onApply={applyScale}
+              onCancel={stopCalibrating}
             />
-            <p className="mt-1 text-[11.5px] leading-relaxed text-slate-400">
-              Set once so a panel matches the roof in the photo. Every array uses it —
-              real panels are all the same size. Doesn't change the system size.
-            </p>
-          </div>
+          ) : scaledToLife ? (
+            <div className="rounded-lg bg-emerald-50 px-3 py-2.5">
+              <div className="flex items-baseline justify-between">
+                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-emerald-800">
+                  <Check size={13} /> Drawn to scale
+                </span>
+                <span className="font-mono text-[12px] tabular-nums text-emerald-700">
+                  {siteWidthMetres?.toFixed(0)} m across
+                </span>
+              </div>
+              <p className="mt-1.5 text-[11.5px] leading-relaxed text-emerald-900/80">
+                A {panelSpec.brand === "Other" ? "panel" : panelSpec.model} is{" "}
+                {panelLengthMetres.toFixed(2)} m long, so that is exactly how long it is on
+                the roof. Change the panel and they resize themselves.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <div className="mb-1 flex items-center justify-between text-[13px] text-slate-600">
+                <span>Panel size on the photo</span>
+                <span className="font-mono text-[12px] text-slate-500">
+                  {Math.round(panelWidth)}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="6"
+                max="110"
+                value={panelWidth}
+                onChange={(e) => setPanelWidth(Number(e.target.value))}
+                aria-label="Panel size on the photo"
+                className="w-full accent-brand-600"
+              />
+              <p className="mt-1 text-[11.5px] leading-relaxed text-slate-400">
+                This photo's scale isn't known, so panels are sized by eye. Measure
+                something on it and they'll size themselves.
+              </p>
+            </div>
+          )}
+
+          {!calibrating && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={startCalibrating}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-300 py-2 text-[12.5px] font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                <Ruler size={13} /> {scaledToLife ? "Redo the scale" : "Measure the photo"}
+              </button>
+              {scaledToLife && (
+                <button
+                  type="button"
+                  onClick={clearSiteScale}
+                  title="Go back to sizing panels by eye"
+                  className="rounded-md border border-slate-300 px-2.5 py-2 text-[12.5px] font-medium text-slate-500 transition hover:bg-slate-50"
+                >
+                  By eye
+                </button>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
             onClick={addNote}
@@ -255,7 +337,13 @@ export default function DesignStage({ q }) {
           {/* Contextual bar — only what applies to what's selected. */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <p className="text-[12.5px] text-slate-600">
-              {selected ? (
+              {calibrating ? (
+                <span className="font-medium text-amber-800">
+                  {line
+                    ? "Now type how long that is, on the left."
+                    : "Drag a line across something you know the length of — a garage door, a car, the street."}
+                </span>
+              ) : selected ? (
                 <>
                   <strong className="font-semibold text-slate-800">
                     {selected.cols} × {selected.rows} = {selected.cols * selected.rows} panels
@@ -267,7 +355,7 @@ export default function DesignStage({ q }) {
                 <>Drag anywhere on the roof to lay panels. Scroll to zoom, alt-drag to pan.</>
               )}
             </p>
-            {selected && (
+            {selected && !calibrating && (
               <div className="ml-auto flex items-center gap-2">
                 <button
                   type="button"
@@ -300,6 +388,9 @@ export default function DesignStage({ q }) {
             onChange={changeItem}
             onCreate={createArray}
             onDelete={deleteItem}
+            calibrating={calibrating}
+            onCalibrated={onCalibrated}
+            metresPerUnit={siteScale}
           />
 
           <p className="mt-3 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-slate-500">
@@ -310,6 +401,94 @@ export default function DesignStage({ q }) {
           </p>
         </div>
       </main>
+    </div>
+  );
+}
+
+/**
+ * The two-step scale setter: drag a line on the photo, say how long it is.
+ *
+ * The presets are there because the length is the hard part — a rep can see a
+ * garage door on the aerial, but not many of them know it is 2.4 m. Tapping one
+ * is a complete answer, so the common case is one drag and one tap.
+ */
+function Calibrator({ line, metresText, setMetresText, onApply, onCancel }) {
+  const typed = Number(metresText);
+  const ready = Boolean(line) && Number.isFinite(typed) && typed > 0;
+
+  return (
+    <div className="space-y-2.5">
+      <div className="rounded-lg bg-amber-50 px-3 py-2.5 text-[11.5px] leading-relaxed text-amber-900">
+        {line ? (
+          <>
+            <span className="font-semibold">Line drawn.</span> How long is it on the
+            ground? Drag again to move it.
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">Drag a line</span> across something on the
+            photo you know the length of.
+          </>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-1.5">
+        {CALIBRATION_HINTS.map((h) => (
+          <button
+            key={h.label}
+            type="button"
+            disabled={!line}
+            onClick={() => {
+              setMetresText(String(h.metres));
+              onApply(h.metres);
+            }}
+            className="rounded-md border border-slate-300 px-2 py-1.5 text-left text-[11px] leading-tight text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+          >
+            {h.label}
+            <span className="block font-mono text-[11px] text-slate-400">{h.metres} m</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="relative flex-1">
+          <span className="sr-only">Length of the line, in metres</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.1"
+            min="0"
+            value={metresText}
+            disabled={!line}
+            onChange={(e) => setMetresText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && ready) onApply(typed);
+            }}
+            placeholder="or type it"
+            className="h-9 w-full rounded-md border border-slate-300 pl-2.5 pr-8 text-[13px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 disabled:bg-slate-50"
+          />
+          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
+            m
+          </span>
+        </label>
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={() => onApply(typed)}
+          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand-600 px-3 text-[12.5px] font-medium text-white transition hover:bg-brand-700 disabled:bg-slate-200 disabled:text-slate-400"
+        >
+          <Check size={13} /> Set
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          title="Cancel"
+          aria-label="Cancel"
+          className="grid h-9 w-9 place-items-center rounded-md border border-slate-300 text-slate-500 transition hover:bg-slate-50"
+        >
+          <X size={14} />
+        </button>
+      </div>
     </div>
   );
 }

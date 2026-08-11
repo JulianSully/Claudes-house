@@ -9,10 +9,12 @@ import {
   DEFAULT_ASPECT,
 } from "../design/layout";
 import { panelById, panelRatio, DEFAULT_PANEL_ID } from "../design/panels";
+import { panelUnitsFor, groundWidthMetres } from "../design/scale";
 import {
   DEFAULT_CUSTOMER,
   DEFAULT_SITE_IMAGE,
   DEFAULT_SITE_ASPECT,
+  DEFAULT_SITE_SCALE,
 } from "../lib/defaults";
 import {
   useSolarResults,
@@ -57,9 +59,38 @@ export function useQuote() {
     setPanelIdRaw(id);
     setPanelWatts(panelById(id).watts);
   };
-  // Panel size on the photo is a property of the site, not of each array —
-  // every panel on a job is the same physical size.
-  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
+  /* ---- how big a panel is drawn ----
+   *
+   * Once the canvas knows what the photo is worth in metres, nobody should be
+   * sizing panels by eye: a 1.76 m module is 1.76 m on the roof, and swapping
+   * to a longer panel makes it longer on the drawing without anyone touching a
+   * slider. The scale comes from the imagery when it was fetched, or from one
+   * line the rep drags across something they know the length of.
+   *
+   * The hand-set width stays as the fallback for a photo with no scale — a
+   * driveway snap off a phone, say — and as the escape hatch when the
+   * calibration is fighting the rep rather than helping.
+   */
+  const [siteScale, setSiteScale] = useState(DEFAULT_SITE_SCALE); // m per viewBox unit
+  const [manualPanelWidth, setManualPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
+
+  const autoPanelWidth = panelUnitsFor(panelSpec.longMm, siteScale);
+  // A calibration line drawn 3 px long, or metres typed into the wrong field,
+  // would otherwise put a panel the size of the suburb on screen.
+  const panelWidth =
+    autoPanelWidth === null ? manualPanelWidth : Math.min(320, Math.max(3, autoPanelWidth));
+  const scaledToLife = autoPanelWidth !== null;
+
+  // Dropping the scale keeps the panels the size they already were, so the
+  // drawing doesn't jump the moment the rep takes over.
+  const clearSiteScale = () => {
+    setManualPanelWidth(panelWidth);
+    setSiteScale(null);
+  };
+  const setPanelWidth = (w) => {
+    setSiteScale(null);
+    setManualPanelWidth(w);
+  };
 
   // Tariff
   const [supplyCharge, setSupplyCharge] = useState(1.1); // $/day
@@ -173,6 +204,9 @@ export function useQuote() {
     notes, setNotes,
     panelWatts, setPanelWatts,
     panelWidth, setPanelWidth,
+    siteScale, setSiteScale, clearSiteScale, scaledToLife,
+    siteWidthMetres: groundWidthMetres(siteScale),
+    panelLengthMetres: panelSpec.longMm / 1000,
     panelId, setPanelId, panelSpec,
     panelRatio: panelRatio(panelSpec),
     placedPanels, sizeFromLayout,
