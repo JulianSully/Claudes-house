@@ -16,11 +16,8 @@ import {
   VIEWBOX_WIDTH,
   toWorld,
   toLocal,
-  fitPanels,
-  resizeFromCorner,
   angleTo,
   normaliseAngle,
-  duplicateArray,
 } from "./layout";
 import { PANELS, panelById, panelLabel, panelRatio } from "./panels";
 
@@ -181,32 +178,6 @@ describe("canvas geometry", () => {
     expect(world.y).toBeCloseTo(50, 9);
   });
 
-  it("fits whole panels to a dragged rectangle", () => {
-    const { cols, rows } = fitPanels(4 * PW + 3 * PANEL_GAP, 2 * PW * PANEL_ASPECT + PANEL_GAP, PW);
-    expect(cols).toBe(4);
-    expect(rows).toBe(2);
-  });
-
-  it("never fits fewer than one panel, however small the drag", () => {
-    expect(fitPanels(0, 0, PW)).toEqual({ cols: 1, rows: 1 });
-    expect(fitPanels(-30, -12, PW)).toEqual({ cols: 1, rows: 1 });
-  });
-
-  it("keeps the near corner pinned while resizing a rotated array", () => {
-    // The rotation pivot is the centre, and the centre moves as the array
-    // grows — so without correction the shape slides out from under the
-    // cursor the moment it is on an angle.
-    for (const rotation of [0, 30, -45, 120]) {
-      const a = { ...makeArray({ x: 200, y: 140, cols: 3, rows: 2 }), rotation };
-      const before = toWorld(a, PW, 0, 0);
-      const grown = resizeFromCorner(a, PW, 6 * PW, 4 * PW * PANEL_ASPECT);
-      const after = toWorld(grown, PW, 0, 0);
-      expect(after.x, `rot ${rotation}`).toBeCloseTo(before.x, 6);
-      expect(after.y, `rot ${rotation}`).toBeCloseTo(before.y, 6);
-      expect(grown.cols).toBeGreaterThan(a.cols);
-    }
-  });
-
   it("reads zero degrees as straight up from the centre", () => {
     const a = makeArray({ x: 0, y: 0, cols: 4, rows: 2 });
     const { width, height } = arraySize(a, PW);
@@ -221,15 +192,6 @@ describe("canvas geometry", () => {
     expect(normaliseAngle(270)).toBeCloseTo(-90, 9);
     expect(normaliseAngle(-270)).toBeCloseTo(90, 9);
     expect(normaliseAngle(0)).toBe(0);
-  });
-
-  it("duplicates an array as a new object, offset so it isn't hidden", () => {
-    const a = makeArray({ x: 10, y: 20, cols: 3, rows: 2 });
-    const copy = duplicateArray(a);
-    expect(copy.id).not.toBe(a.id);
-    expect(copy.x).toBeGreaterThan(a.x);
-    expect(copy.y).toBeGreaterThan(a.y);
-    expect(copy.cols).toBe(3);
   });
 });
 
@@ -268,14 +230,6 @@ describe("panel brands and mounting", () => {
     expect(land.panelWidth).toBeCloseTo(port.panelHeight, 9);
     expect(land.panelHeight).toBeCloseTo(port.panelWidth, 9);
     expect(port.panelHeight).toBeGreaterThan(port.panelWidth); // taller than wide
-  });
-
-  it("fits a different number of panels to the same rectangle each way up", () => {
-    const spec = { panelWidth: 40, ratio: panelRatio(trina) };
-    const land = fitPanels(200, 120, { ...spec, orientation: "landscape" });
-    const port = fitPanels(200, 120, { ...spec, orientation: "portrait" });
-    expect(land).not.toEqual(port);
-    expect(port.cols).toBeGreaterThan(land.cols); // narrower panels, more across
   });
 
   it("still accepts a bare panel width, as it used to", () => {

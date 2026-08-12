@@ -3,7 +3,6 @@ import {
   Grid3x3,
   MessageSquarePlus,
   Trash2,
-  Copy,
   Undo2,
   Sun,
   Info,
@@ -25,7 +24,6 @@ import {
   keepOnCanvas,
   updateItem,
   removeItem,
-  duplicateArray,
 } from "./layout";
 import { ORIENTATIONS } from "./panels";
 import { scaleFromCalibration, CALIBRATION_HINTS } from "./scale";
@@ -36,8 +34,9 @@ import { kw } from "../lib/format";
  * The design screen.
  *
  * The whole point is that laying out a roof is one continuous motion — pick a
- * panel, drop it on the house, drag the row out, rotate it to the roof line.
- * No plane to define first, no dialog between placing and seeing the kW.
+ * panel, drag it onto the house, rotate it to the roof line, then build out from
+ * it. No plane to define first, no dialog between placing and seeing the kW, and
+ * exactly one way to make more panels rather than three that half overlap.
  *
  * So the canvas gets everything that is about the roof, and this panel keeps
  * only what is about the JOB: which module, how big the gap between them, what
@@ -50,21 +49,14 @@ const TOOLS = [
     label: "Select",
     key: "V",
     icon: MousePointer2,
-    hint: "Drag an array to move it, drag the photo to pan.",
-  },
-  {
-    value: "panel",
-    label: "Panel",
-    key: "P",
-    icon: PanelsTopLeft,
-    hint: "Tap the roof to drop a panel, or drag out a block.",
+    hint: "Drag a panel to move it, drag the photo to pan.",
   },
   {
     value: "build",
     label: "Build",
     key: "B",
     icon: CopyPlus,
-    hint: "Drag off a block to repeat it across the roof.",
+    hint: "Drag off a panel to repeat it across the roof.",
   },
   {
     value: "erase",
@@ -149,6 +141,7 @@ export default function DesignStage({ q }) {
   };
 
   const selected = arrays.find((a) => a.id === selectedId) ?? null;
+  const selectedPanels = selected ? selected.cols * selected.rows : 0;
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
   const spec = { panelWidth, ratio: panelRatio, gap: panelGap };
 
@@ -164,8 +157,6 @@ export default function DesignStage({ q }) {
     remember();
     setArrays([...arrays, keepOnCanvas(array, imageAspect, spec)]);
     setSelectedId(array.id);
-    // Dropping a panel and then wanting to move it is the common next step.
-    if (tool === "panel") setTool("select");
   };
 
   /** The build tool's output: several arrays in one go, so one Undo takes the
@@ -199,14 +190,6 @@ export default function DesignStage({ q }) {
     const gone = new Set(ids);
     setArrays(arrays.filter((a) => !gone.has(a.id)));
     setSelectedId((id) => (gone.has(id) ? null : id));
-  };
-
-  const duplicate = () => {
-    if (!selected) return;
-    remember();
-    const copy = duplicateArray(selected);
-    setArrays([...arrays, copy]);
-    setSelectedId(copy.id);
   };
 
   const addNote = () => {
@@ -389,33 +372,24 @@ export default function DesignStage({ q }) {
 
         {selected && (
           <Panel
-            title={`Array — ${selected.cols} × ${selected.rows}`}
+            title={selectedPanels === 1 ? "Selected panel" : `Selected — ${selectedPanels} panels`}
             icon={Grid3x3}
             action={
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={duplicate}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-slate-500 transition hover:bg-slate-100"
-                >
-                  <Copy size={12} /> Copy
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deleteItem(selected.id)}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-red-600 transition hover:bg-red-50"
-                >
-                  <Trash2 size={12} /> Delete
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => deleteItem(selected.id)}
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-red-600 transition hover:bg-red-50"
+              >
+                <Trash2 size={12} /> Delete
+              </button>
             }
           >
             <div className="flex items-baseline justify-between rounded-lg bg-slate-50 px-3 py-2">
               <span className="text-[12.5px] text-slate-600">
-                {selected.cols * selected.rows} panels
+                {selectedPanels} panel{selectedPanels === 1 ? "" : "s"}
               </span>
               <span className="font-mono text-[13px] font-semibold tabular-nums text-slate-900">
-                {kw((selected.cols * selected.rows * (Number(panelWatts) || 0)) / 1000)}
+                {kw((selectedPanels * (Number(panelWatts) || 0)) / 1000)}
               </span>
             </div>
 
@@ -495,30 +469,42 @@ export default function DesignStage({ q }) {
         )}
 
         {arrays.length > 0 && (
-          <Panel title={`Arrays (${arrays.length})`} icon={Grid3x3}>
-            <ul className="space-y-1.5">
-              {arrays.map((a, i) => (
-                <li key={a.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTool("select");
-                      setSelectedId(a.id);
-                    }}
-                    className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-[12.5px] transition ${
-                      a.id === selectedId
-                        ? "border-brand-500 bg-brand-50 text-brand-800"
-                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <span>Array {i + 1}</span>
-                    <span className="font-mono text-slate-500">
-                      {a.cols}×{a.rows} · {a.cols * a.rows}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+          <Panel title={`On the roof (${arrays.length})`} icon={Grid3x3}>
+            {/* Panels go down one at a time now, so a long job would turn this
+                into a hundred identical rows. Past a handful it stops being a
+                list worth reading and the roof itself is the better index. */}
+            {arrays.length <= 10 ? (
+              <ul className="space-y-1.5">
+                {arrays.map((a, i) => (
+                  <li key={a.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTool("select");
+                        setSelectedId(a.id);
+                      }}
+                      className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-[12.5px] transition ${
+                        a.id === selectedId
+                          ? "border-brand-500 bg-brand-50 text-brand-800"
+                          : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span>
+                        {a.cols * a.rows === 1 ? `Panel ${i + 1}` : `Block ${i + 1}`}
+                      </span>
+                      <span className="font-mono text-slate-500">
+                        {a.cols * a.rows === 1 ? "1" : `${a.cols}×${a.rows} · ${a.cols * a.rows}`}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="rounded-lg bg-slate-50 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-500">
+                Tap one on the roof to select it, or switch to the eraser and drag
+                across the ones you want gone.
+              </p>
+            )}
           </Panel>
         )}
       </aside>
@@ -561,9 +547,9 @@ export default function DesignStage({ q }) {
               {measuring && line
                 ? "Now type how long that is, on the left."
                 : tool === "build" && selected
-                  ? `Drag off the ${selected.cols} × ${selected.rows} block — every step is another whole one`
+                  ? `Drag off it — every step lays another ${selectedPanels === 1 ? "panel" : "block"}`
                   : selected && tool === "select"
-                    ? `${selected.cols} × ${selected.rows} = ${selected.cols * selected.rows} panels at ${Math.round(selected.rotation)}° — side handle runs the row out`
+                    ? `${selectedPanels} panel${selectedPanels === 1 ? "" : "s"} at ${Math.round(selected.rotation)}° — switch to Build to lay more like it`
                     : activeTool?.hint}
             </p>
           </div>

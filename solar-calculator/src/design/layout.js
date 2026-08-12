@@ -64,13 +64,6 @@ export function makeArray({ x, y, cols = 4, rows = 2, rotation = 0, orientation 
   };
 }
 
-export const duplicateArray = (a, offset = 14) => ({
-  ...a,
-  id: nextId("arr"),
-  x: a.x + offset,
-  y: a.y + offset,
-});
-
 export function makeNote({ x, y, text = "" }) {
   return { id: nextId("note"), kind: "note", x, y, text };
 }
@@ -179,56 +172,13 @@ export function toLocal(a, spec, worldX, worldY) {
 }
 
 /**
- * How many whole panels fit in a dragged rectangle. At least one either way —
- * a stray click should still leave a panel behind rather than nothing.
- */
-export function fitPanels(width, height, spec = {}) {
-  const s = typeof spec === "number" ? { panelWidth: spec } : spec;
-  const longSide = s.panelWidth ?? DEFAULT_PANEL_WIDTH;
-  const ratio = s.ratio ?? PANEL_ASPECT;
-  const portrait = (s.orientation ?? "landscape") === "portrait";
-  const pw = portrait ? longSide * ratio : longSide;
-  const ph = portrait ? longSide : longSide * ratio;
-  const gap = s.gap ?? gapFor(longSide);
-  return {
-    cols: clampCount(Math.max(1, Math.round((Math.abs(width) + gap) / (pw + gap)))),
-    rows: clampCount(Math.max(1, Math.round((Math.abs(height) + gap) / (ph + gap)))),
-  };
-}
-
-/**
- * Grow or shrink an array by dragging a handle, keeping the OPPOSITE corner
- * pinned. Without this the shape drifts under the cursor whenever it is
- * rotated, because the rotation pivot is the centre and the centre moves as the
- * array grows.
- *
- * `axis` is what the handle is allowed to change: "x" for the side handle that
- * runs a row out along the roof, "y" for the one that stacks rows down it,
- * "both" for the corner. Constraining an edge handle to one axis is what makes
- * dragging out a row feel like laying panels rather than fighting a rectangle.
- */
-export function resizeFromCorner(a, spec, localX, localY, axis = "both") {
-  const anchor = toWorld(a, spec, 0, 0);
-  const fitted = fitPanels(localX, localY, { ...spec, orientation: a.orientation });
-  const next = {
-    ...a,
-    cols: axis === "y" ? a.cols : fitted.cols,
-    rows: axis === "x" ? a.rows : fitted.rows,
-  };
-
-  const { width, height } = arraySize(next, spec);
-  const rad = (next.rotation * Math.PI) / 180;
-  const d = rotatePoint(-width / 2, -height / 2, rad);
-  return { ...next, x: anchor.x - width / 2 - d.x, y: anchor.y - height / 2 - d.y };
-}
-
-/**
  * The build tool: repeat a block across the roof.
  *
- * Rather than placing every array by hand, you lay one row out properly and
- * then drag across to stamp it again and again. The repeats step by one whole
+ * Nothing on the canvas creates panels by being dragged across open roof. One
+ * panel comes off the palette, and everything after that is this: drag off what
+ * is already there and it stamps again and again. The repeats step by one whole
  * block plus the panel margin, and they step along the ARRAY'S OWN axes rather
- * than the screen's — so a row set to a roof at 37° carries on down that roof,
+ * than the screen's — so a panel set to a roof at 37° carries on down that roof,
  * not off sideways across the ridge.
  *
  * `localX/localY` is the pointer in the source array's own space, which is what

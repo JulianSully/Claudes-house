@@ -7,10 +7,8 @@ import {
   pointerToViewBox,
   toLocal,
   toWorld,
-  resizeFromCorner,
   angleTo,
   normaliseAngle,
-  fitPanels,
   makeArray,
   buildSteps,
   buildCopies,
@@ -27,32 +25,30 @@ import { snapPosition, snapRotation } from "./snap";
  * define before panels can go on, the way engineering-first tools work. Panels
  * go straight onto the photo.
  *
+ * There are exactly two ways to get panels onto a roof, and no third:
+ *
+ *   1. Drag one off the palette and drop it where it goes.
+ *   2. Use the BUILD tool to repeat what is already there.
+ *
+ * That is the whole creation story. Nothing on this canvas makes a panel by
+ * being dragged across open roof, which is what leaves every plain drag free to
+ * mean "move the photo" — the thing a drag means on any map.
+ *
  *   SELECT:     drag an array ....... moves it, snapping to what is already there
- *               drag the photo ...... pans, so getting around while zoomed in is
- *                                     the same drag it is on any map
- *               side handle ......... runs the row out along the roof
- *               bottom handle ....... stacks more rows down it
- *               corner .............. both at once
+ *               drag the photo ...... pans, at any zoom
  *               top knob ............ rotates (Shift snaps to 15°)
- *   PANEL tool: tap the roof ........ drops one panel there
- *               drag ................ lays a block of whole panels
- *   BUILD:      drag off an array ... repeats it across the roof, one whole
+ *   BUILD:      drag off a panel .... repeats it across the roof, one whole
  *                                     block at a time, along its own angle
  *   ERASE:      tap or sweep ........ rubs out every block the stroke crosses,
  *                                     all in one go so one Undo brings it back
  *   MEASURE:    drag a line ......... sets the scale of the photo
- *
- * The select tool never CREATES anything, which is what lets a plain drag pan.
- * Laying panels is the panel tool's job, and that is the one place a drag on
- * open roof draws a block.
  *
  *   pinch on a trackpad ... zoom about the cursor (+ and − also zoom)
  *   space-drag, alt-drag or middle-drag ... pan from any tool, over anything
  *   arrows ... nudge, Shift for a bigger step
  *   Delete / Backspace ... remove      Escape ... deselect
  *
- * A panel dragged off the palette lands here too, through the browser's own
- * drag and drop.
+ * The palette drop arrives through the browser's own drag and drop.
  *
  * The image lives INSIDE the svg, so zoom and pan are one viewBox change rather
  * than two coordinate systems kept in step.
@@ -81,7 +77,6 @@ export default function DesignCanvas({
   const svgRef = useRef(null);
   const gesture = useRef(null);
   const [, forceRender] = useState(0);
-  const [draft, setDraft] = useState(null); // rectangle being dragged out
   const [ruler, setRuler] = useState(null); // measuring line
   const [guides, setGuides] = useState([]); // alignment lines, while snapping
   const [build, setBuild] = useState(null); // repeats being dragged out
@@ -106,6 +101,21 @@ export default function DesignCanvas({
   );
   const [view, setView] = useState(fullView);
   useEffect(() => setView(fullView), [fullView]);
+
+  /**
+   * Keep the photo in view. Now that a plain drag pans, it is easy to fling the
+   * house off the edge and be left looking at nothing; this stops the view
+   * sliding more than halfway off the image, so there is always a roof on
+   * screen to drag back towards.
+   */
+  const clampView = useCallback(
+    (v) => ({
+      ...v,
+      x: Math.max(-v.w / 2, Math.min(VIEWBOX_WIDTH - v.w / 2, v.x)),
+      y: Math.max(-v.h / 2, Math.min(worldHeight - v.h / 2, v.y)),
+    }),
+    [worldHeight]
+  );
 
   // The measuring line stays on screen while the rep types how long it is, and
   // clears the moment they finish or switch tools.
@@ -184,11 +194,13 @@ export default function DesignCanvas({
         if (Math.hypot(p.x - g.start.x, p.y - g.start.y) > 3) g.moved = true;
         // The pointer should stay glued to the same spot on the photo, so the
         // view moves by the delta in world units, not screen pixels.
-        setView((v) => ({
-          ...v,
-          x: g.startView.x - (p.x - g.start.x),
-          y: g.startView.y - (p.y - g.start.y),
-        }));
+        setView((v) =>
+          clampView({
+            ...v,
+            x: g.startView.x - (p.x - g.start.x),
+            y: g.startView.y - (p.y - g.start.y),
+          })
+        );
         return;
       }
       if (g.type === "build") {
@@ -198,10 +210,6 @@ export default function DesignCanvas({
       }
       if (g.type === "erase") {
         sweep(g, p);
-        return;
-      }
-      if (g.type === "draw") {
-        setDraft({ x0: g.start.x, y0: g.start.y, x1: p.x, y1: p.y });
         return;
       }
       if (g.type === "measure") {
@@ -234,12 +242,6 @@ export default function DesignCanvas({
         });
         setGuides(result.guides);
         onChange(g.id, { x: result.x, y: result.y });
-        return;
-      }
-      if (g.type === "resize" || g.type === "resize-x" || g.type === "resize-y") {
-        const local = toLocal(g.item, spec, p.x, p.y);
-        const axis = g.type === "resize-x" ? "x" : g.type === "resize-y" ? "y" : "both";
-        onChange(g.id, resizeFromCorner(g.item, spec, local.x, local.y, axis));
         return;
       }
       if (g.type === "rotate") {
@@ -293,30 +295,6 @@ export default function DesignCanvas({
         onCalibrated?.(line);
         return;
       }
-      if (g.type === "draw") {
-        const p = pointerToViewBox(svgRef.current, e);
-        const w = Math.abs(p.x - g.start.x);
-        const h = Math.abs(p.y - g.start.y);
-        setDraft(null);
-
-        // A tap drops a single panel with the panel tool, and means "nothing
-        // selected" with the select tool.
-        if (w < 6 && h < 6) {
-          if (g.dropOnTap) dropPanel(g.start);
-          else onSelect(null);
-          return;
-        }
-        const { cols, rows } = fitPanels(w, h, spec);
-        const created = makeArray({
-          x: Math.min(g.start.x, p.x),
-          y: Math.min(g.start.y, p.y),
-          cols,
-          rows,
-          orientation: spec.orientation,
-        });
-        onCreate(created);
-        return;
-      }
       forceRender((n) => n + 1);
     };
 
@@ -337,6 +315,7 @@ export default function DesignCanvas({
     onCalibrated,
     dropPanel,
     sweep,
+    clampView,
     spec,
     readOnly,
   ]);
@@ -407,10 +386,15 @@ export default function DesignCanvas({
         const w = Math.min(VIEWBOX_WIDTH * 1.5, Math.max(VIEWBOX_WIDTH * 0.12, v.w * factor));
         const h = w * (v.h / v.w);
         // Keep whatever is under the cursor exactly where it is.
-        return { x: p.x - ((p.x - v.x) * w) / v.w, y: p.y - ((p.y - v.y) * h) / v.h, w, h };
+        return clampView({
+          x: p.x - ((p.x - v.x) * w) / v.w,
+          y: p.y - ((p.y - v.y) * h) / v.h,
+          w,
+          h,
+        });
       });
     },
-    [readOnly]
+    [readOnly, clampView]
   );
 
   // React attaches wheel passively, which forbids preventDefault, so bind it here.
@@ -425,7 +409,7 @@ export default function DesignCanvas({
     setView((v) => {
       const w = Math.min(VIEWBOX_WIDTH * 1.5, Math.max(VIEWBOX_WIDTH * 0.12, v.w * factor));
       const h = w * (v.h / v.w);
-      return { x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
+      return clampView({ x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h });
     });
 
   const scale = view.w / VIEWBOX_WIDTH; // handles keep a constant on-screen size
@@ -454,15 +438,10 @@ export default function DesignCanvas({
       return;
     }
 
-    // Dragging open roof with the panel tool lays a block. With every other
-    // tool it moves the photo, which is what a drag means on a map and what
-    // stops a rep papering the suburb in panels while trying to get around.
-    if (tool !== "panel") {
-      gesture.current = { type: "pan", start: p, startView: view, deselectOnTap: true };
-      return;
-    }
-    gesture.current = { type: "draw", start: p, dropOnTap: true };
-    setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+    // Nothing is created by dragging open roof, so every such drag moves the
+    // photo. That is what a drag means on a map, and it is what stops a rep
+    // papering the suburb in panels while trying to get around.
+    gesture.current = { type: "pan", start: p, startView: view, deselectOnTap: true };
   };
 
   const startMove = (e, item) => {
@@ -600,18 +579,14 @@ export default function DesignCanvas({
           <Guide key={i} guide={g} scale={scale} />
         ))}
 
-        {draft && <DraftRect draft={draft} spec={spec} scale={scale} />}
         {build && <BuildPreview build={build} spec={spec} scale={scale} />}
         {ruler && <Ruler line={ruler} scale={scale} metresPerUnit={metresPerUnit} />}
 
         {selected && !readOnly && tool === "select" && (
-          <Handles
+          <RotateHandle
             array={selected}
             spec={spec}
             scale={scale}
-            onResize={(e) => startHandle(e, "resize")}
-            onResizeX={(e) => startHandle(e, "resize-x")}
-            onResizeY={(e) => startHandle(e, "resize-y")}
             onRotate={(e) => startHandle(e, "rotate")}
           />
         )}
@@ -733,40 +708,20 @@ function PanelArray({
 }
 
 /**
- * Grips for building the array out.
+ * The rotate grip.
  *
- * Three of them rather than one corner: the side handle runs a row out along
- * the roof, the bottom handle stacks rows down it, and the corner does both.
- * Each is constrained to its own axis, so dragging a row out never accidentally
- * adds a second row — which is the whole reason laying panels this way is
- * faster than editing numbers.
+ * The only handle left. Arrays used to carry corner and edge grips that grew
+ * them a panel at a time; making more panels is the build tool's job now, and
+ * one job in one place beats the same job in three.
+ *
+ * Sized in screen terms so it stays grabbable at any zoom.
  */
-function Handles({ array: a, spec, scale, onResize, onResizeX, onResizeY, onRotate }) {
-  const { width, height } = arraySize(a, spec);
+function RotateHandle({ array: a, spec, scale, onRotate }) {
+  const { width } = arraySize(a, spec);
   const r = 6 * scale;
-  const corner = toWorld(a, spec, width, height);
-  const side = toWorld(a, spec, width, height / 2);
-  const foot = toWorld(a, spec, width / 2, height);
   const stem = 26 * scale;
   const knob = toWorld(a, spec, width / 2, -stem);
   const top = toWorld(a, spec, width / 2, 0);
-
-  // The edge grips are drawn as bars lying along the edge they belong to, so
-  // which way a handle will build is readable before it is dragged.
-  const grip = ({ point, cursor, onPointerDown, upright }) => (
-    <rect
-      x={point.x - (upright ? r * 0.55 : r)}
-      y={point.y - (upright ? r : r * 0.55)}
-      width={upright ? r * 1.1 : r * 2}
-      height={upright ? r * 2 : r * 1.1}
-      rx={1.5 * scale}
-      fill="#fff"
-      stroke="#3163F5"
-      strokeWidth={2 * scale}
-      style={{ cursor }}
-      onPointerDown={onPointerDown}
-    />
-  );
 
   return (
     <g>
@@ -787,20 +742,6 @@ function Handles({ array: a, spec, scale, onResize, onResizeX, onResizeY, onRota
         strokeWidth={2 * scale}
         style={{ cursor: "grab" }}
         onPointerDown={onRotate}
-      />
-      {grip({ point: side, cursor: "ew-resize", onPointerDown: onResizeX, upright: true })}
-      {grip({ point: foot, cursor: "ns-resize", onPointerDown: onResizeY, upright: false })}
-      <rect
-        x={corner.x - r}
-        y={corner.y - r}
-        width={r * 2}
-        height={r * 2}
-        rx={1.5 * scale}
-        fill="#fff"
-        stroke="#3163F5"
-        strokeWidth={2 * scale}
-        style={{ cursor: "nwse-resize" }}
-        onPointerDown={onResize}
       />
     </g>
   );
@@ -880,50 +821,6 @@ function Guide({ guide, scale }) {
       strokeDasharray={`${5 * scale} ${4 * scale}`}
       pointerEvents="none"
     />
-  );
-}
-
-/** Live preview while dragging out a new array, with the panel count on it. */
-function DraftRect({ draft, spec, scale }) {
-  const x = Math.min(draft.x0, draft.x1);
-  const y = Math.min(draft.y0, draft.y1);
-  const w = Math.abs(draft.x1 - draft.x0);
-  const h = Math.abs(draft.y1 - draft.y0);
-  if (w < 4 && h < 4) return null;
-  const { cols, rows } = fitPanels(w, h, spec);
-
-  return (
-    <g pointerEvents="none">
-      <rect
-        x={x}
-        y={y}
-        width={w}
-        height={h}
-        fill="#3163F5"
-        fillOpacity="0.18"
-        stroke="#3163F5"
-        strokeWidth={1.6 * scale}
-      />
-      <rect
-        x={x}
-        y={y - 20 * scale}
-        width={64 * scale}
-        height={16 * scale}
-        rx={3 * scale}
-        fill="#0B1220"
-        fillOpacity="0.9"
-      />
-      <text
-        x={x + 32 * scale}
-        y={y - 8 * scale}
-        textAnchor="middle"
-        fontSize={11 * scale}
-        fill="#fff"
-        fontFamily="ui-monospace, monospace"
-      >
-        {cols} × {rows} = {cols * rows}
-      </text>
-    </g>
   );
 }
 

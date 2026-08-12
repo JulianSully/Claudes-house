@@ -21,6 +21,10 @@ import {
  * draggable — drag it onto the aerial and a panel lands where it is dropped.
  * There is no roof plane to define first, no wizard; the module IS the tool.
  *
+ * This tile is also the ONLY way a panel gets created. Everything after the
+ * first one comes from the build tool, which is why it is drawn as a target
+ * rather than tucked in as a decoration.
+ *
  * Favourites exist because a rep sells the same three or four panels all year.
  * Starring them puts them at the top of the list for every job after this one.
  */
@@ -205,7 +209,7 @@ function PaletteTile({ panelSpec, panelWatts }) {
       <div className="min-w-0">
         <div className="text-[12px] font-semibold text-brand-900">Drag onto the roof</div>
         <div className="text-[11px] text-brand-800/70">
-          or tap it there with the panel tool · {panelWatts || panelSpec.watts} W
+          {panelWatts || panelSpec.watts} W · then use Build to lay the rest
         </div>
       </div>
     </div>

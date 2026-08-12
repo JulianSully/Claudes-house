@@ -5,7 +5,6 @@ import {
   makeArray,
   arrayBounds,
   arraySize,
-  resizeFromCorner,
   buildSteps,
   buildCopies,
   strokeHitsArray,
@@ -150,43 +149,6 @@ describe("snapping rotation", () => {
   it("leaves a deliberate angle alone", () => {
     expect(snapRotation(20, others)).toBe(20);
     expect(snapRotation(55, [])).toBe(55);
-  });
-});
-
-describe("building an array out one axis at a time", () => {
-  const a = { ...makeArray({ x: 100, y: 100, cols: 3, rows: 2 }), rotation: 0 };
-
-  it("runs the row out without stacking a second one", () => {
-    const grown = resizeFromCorner(a, SPEC, 6 * 42, 4 * 40 * 0.64, "x");
-    expect(grown.cols).toBeGreaterThan(a.cols);
-    expect(grown.rows).toBe(a.rows);
-  });
-
-  it("stacks rows down without widening the row", () => {
-    const grown = resizeFromCorner(a, SPEC, 6 * 42, 4 * 40 * 0.64, "y");
-    expect(grown.cols).toBe(a.cols);
-    expect(grown.rows).toBeGreaterThan(a.rows);
-  });
-
-  it("does both from the corner, as it always did", () => {
-    const grown = resizeFromCorner(a, SPEC, 6 * 42, 4 * 40 * 0.64, "both");
-    expect(grown.cols).toBeGreaterThan(a.cols);
-    expect(grown.rows).toBeGreaterThan(a.rows);
-  });
-
-  it("keeps the opposite corner pinned on every axis, at any angle", () => {
-    for (const rotation of [0, 33, -70]) {
-      for (const axis of ["x", "y", "both"]) {
-        const item = { ...a, rotation };
-        const before = arrayBounds(item, SPEC);
-        const grown = resizeFromCorner(item, SPEC, 5 * 42, 3 * 26, axis);
-        const after = arrayBounds(grown, SPEC);
-        // The anchor is the array's own origin corner, so in an upright box the
-        // growth is one-sided: it never runs back past where it started.
-        expect(after.left, `${axis} @ ${rotation}`).toBeLessThanOrEqual(before.left + 0.001);
-        expect(after.top, `${axis} @ ${rotation}`).toBeLessThanOrEqual(before.top + 0.001);
-      }
-    }
   });
 });
 
