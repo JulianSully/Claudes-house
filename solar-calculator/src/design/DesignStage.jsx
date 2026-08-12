@@ -71,7 +71,7 @@ const TOOLS = [
     label: "Erase",
     key: "E",
     icon: Eraser,
-    hint: "Tap an array to remove it.",
+    hint: "Tap a block to remove it, or drag across several.",
   },
   {
     value: "measure",
@@ -190,6 +190,15 @@ export default function DesignStage({ q }) {
     if (arrays.some((a) => a.id === id)) setArrays(removeItem(arrays, id));
     else setNotes(removeItem(notes, id));
     setSelectedId(null);
+  };
+
+  /** One sweep of the eraser, however many blocks it crossed. */
+  const deleteMany = (ids) => {
+    if (ids.length === 0) return;
+    remember();
+    const gone = new Set(ids);
+    setArrays(arrays.filter((a) => !gone.has(a.id)));
+    setSelectedId((id) => (gone.has(id) ? null : id));
   };
 
   const duplicate = () => {
@@ -574,6 +583,7 @@ export default function DesignStage({ q }) {
             onCreate={createArray}
             onCreateMany={createMany}
             onDelete={deleteItem}
+            onDeleteMany={deleteMany}
             tool={tool}
             onCalibrated={onCalibrated}
             metresPerUnit={siteScale}

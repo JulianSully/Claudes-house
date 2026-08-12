@@ -14,6 +14,7 @@ import {
   makeArray,
   buildSteps,
   buildCopies,
+  strokeHitsArray,
   DEFAULT_PANEL_WIDTH,
 } from "./layout";
 import { snapPosition, snapRotation } from "./snap";
@@ -37,7 +38,8 @@ import { snapPosition, snapRotation } from "./snap";
  *               drag ................ lays a block of whole panels
  *   BUILD:      drag off an array ... repeats it across the roof, one whole
  *                                     block at a time, along its own angle
- *   ERASE:      tap an array ........ removes it
+ *   ERASE:      tap or sweep ........ rubs out every block the stroke crosses,
+ *                                     all in one go so one Undo brings it back
  *   MEASURE:    drag a line ......... sets the scale of the photo
  *
  * The select tool never CREATES anything, which is what lets a plain drag pan.
@@ -70,6 +72,7 @@ export default function DesignCanvas({
   onCreate, // (array)
   onCreateMany, // (arrays) — the build tool lays several down at once
   onDelete,
+  onDeleteMany, // (ids) — one sweep of the eraser
   readOnly = false,
   tool = "select",
   onCalibrated, // ({ x0, y0, x1, y1 }) while the measure tool is active
@@ -83,6 +86,7 @@ export default function DesignCanvas({
   const [guides, setGuides] = useState([]); // alignment lines, while snapping
   const [build, setBuild] = useState(null); // repeats being dragged out
   const [hoverId, setHoverId] = useState(null); // what the eraser is over
+  const [doomed, setDoomed] = useState([]); // ids the eraser has swept
   const [spaceHeld, setSpaceHeld] = useState(false);
 
   const measuring = tool === "measure";
@@ -113,6 +117,10 @@ export default function DesignCanvas({
     if (!building) setBuild(null);
   }, [building]);
 
+  useEffect(() => {
+    if (!erasing) setDoomed([]);
+  }, [erasing]);
+
   const selected = arrays.find((a) => a.id === selectedId) ?? null;
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
 
@@ -141,6 +149,25 @@ export default function DesignCanvas({
     [onCreate, spec]
   );
 
+  /**
+   * Rub the eraser from where it last was to where it is now, marking whatever
+   * it crossed. Nothing is removed until the stroke ends — the red tells the
+   * rep what is about to go while there is still time to swerve.
+   */
+  const sweep = useCallback((g, point) => {
+    const { arrays: live, spec: liveSpec } = latest.current;
+    let added = false;
+    for (const a of live) {
+      if (g.ids.includes(a.id)) continue;
+      if (strokeHitsArray(a, liveSpec, g.last, point)) {
+        g.ids.push(a.id);
+        added = true;
+      }
+    }
+    g.last = point;
+    if (added) setDoomed([...g.ids]);
+  }, []);
+
   /* ---------------- gestures ---------------- */
 
   useEffect(() => {
@@ -167,6 +194,10 @@ export default function DesignCanvas({
       if (g.type === "build") {
         const local = toLocal(g.item, spec, p.x, p.y);
         setBuild({ item: g.item, ...buildSteps(g.item, spec, local.x, local.y) });
+        return;
+      }
+      if (g.type === "erase") {
+        sweep(g, p);
         return;
       }
       if (g.type === "draw") {
@@ -242,6 +273,13 @@ export default function DesignCanvas({
         if (copies.length > 0) onCreateMany?.(copies);
         return;
       }
+      if (g.type === "erase") {
+        sweep(g, pointerToViewBox(svgRef.current, e));
+        setDoomed([]);
+        // The whole sweep goes as one action, so one Undo brings it all back.
+        if (g.ids.length > 0) onDeleteMany?.(g.ids);
+        return;
+      }
       if (g.type === "measure") {
         const p = pointerToViewBox(svgRef.current, e);
         const line = { x0: g.start.x, y0: g.start.y, x1: p.x, y1: p.y };
@@ -290,7 +328,18 @@ export default function DesignCanvas({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
     };
-  }, [onChange, onCreate, onCreateMany, onSelect, onCalibrated, dropPanel, spec, readOnly]);
+  }, [
+    onChange,
+    onCreate,
+    onCreateMany,
+    onDeleteMany,
+    onSelect,
+    onCalibrated,
+    dropPanel,
+    sweep,
+    spec,
+    readOnly,
+  ]);
 
   /* ---------------- keyboard ---------------- */
 
@@ -396,7 +445,14 @@ export default function DesignCanvas({
       gesture.current = { type: "pan", start: p, startView: view };
       return;
     }
-    if (erasing) return; // nothing to erase out on the open roof
+    if (erasing) {
+      // Start the stroke even out on open roof — that is how you sweep INTO a
+      // block rather than having to start the drag on top of one.
+      const g = { type: "erase", last: p, ids: [] };
+      gesture.current = g;
+      sweep(g, p);
+      return;
+    }
 
     // Dragging open roof with the panel tool lays a block. With every other
     // tool it moves the photo, which is what a drag means on a map and what
@@ -412,11 +468,16 @@ export default function DesignCanvas({
   const startMove = (e, item) => {
     if (readOnly) return;
     e.stopPropagation();
+    const p = pointerToViewBox(svgRef.current, e);
+
     if (erasing) {
-      onDelete(item.id);
+      // Same stroke as starting on open roof, so a tap rubs out one block and
+      // a drag rubs out everything it crosses.
+      const g = { type: "erase", last: p, ids: [] };
+      gesture.current = g;
+      sweep(g, p);
       return;
     }
-    const p = pointerToViewBox(svgRef.current, e);
 
     if (building && item.kind === "array") {
       onSelect(item.id);
@@ -458,11 +519,9 @@ export default function DesignCanvas({
   // the empty canvas is making about what a drag will do there.
   const cursor = readOnly
     ? "default"
-    : erasing
-      ? "not-allowed"
-      : measuring || tool === "panel"
-        ? "crosshair"
-        : "grab";
+    : erasing || measuring || tool === "panel"
+      ? "crosshair"
+      : "grab";
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-slate-300 bg-ink-900">
@@ -516,7 +575,8 @@ export default function DesignCanvas({
               spec={spec}
               scale={scale}
               selected={a.id === selectedId}
-              doomed={erasing && a.id === hoverId}
+              doomed={erasing && (a.id === hoverId || doomed.includes(a.id))}
+              erasing={erasing}
               readOnly={readOnly}
               onPointerDown={(e) => startMove(e, a)}
               onPointerEnter={() => erasing && setHoverId(a.id)}
@@ -600,6 +660,7 @@ function PanelArray({
   scale = 1,
   selected,
   doomed,
+  erasing,
   readOnly,
   onPointerDown,
   onPointerEnter,
@@ -643,7 +704,7 @@ function PanelArray({
       onPointerDown={onPointerDown}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
-      style={{ cursor: readOnly ? "default" : "move" }}
+      style={{ cursor: readOnly ? "default" : erasing ? "crosshair" : "move" }}
     >
       <rect
         x={-pad}

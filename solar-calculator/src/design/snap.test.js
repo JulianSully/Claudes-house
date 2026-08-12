@@ -8,6 +8,7 @@ import {
   resizeFromCorner,
   buildSteps,
   buildCopies,
+  strokeHitsArray,
   toLocal,
   toWorld,
 } from "./layout";
@@ -262,6 +263,65 @@ describe("the build tool", () => {
     const local = toLocal(angled, SPEC, centre.x, centre.y);
     expect(buildSteps(angled, SPEC, local.x, local.y)).toEqual({ across: 0, down: 0 });
     expect(buildCopies(angled, SPEC, { across: 0, down: 0 })).toEqual([]);
+  });
+});
+
+describe("sweeping the eraser", () => {
+  const block = { ...makeArray({ x: 100, y: 100, cols: 3, rows: 2 }), rotation: 0 };
+  const { width, height } = arraySize(block, SPEC);
+  const mid = { x: 100 + width / 2, y: 100 + height / 2 };
+  const p = (x, y) => ({ x, y });
+
+  it("catches a tap on the block — the same stroke, going nowhere", () => {
+    expect(strokeHitsArray(block, SPEC, mid, mid)).toBe(true);
+    expect(strokeHitsArray(block, SPEC, mid)).toBe(true); // no second point at all
+  });
+
+  it("misses a tap on open roof", () => {
+    expect(strokeHitsArray(block, SPEC, p(600, 600), p(600, 600))).toBe(false);
+  });
+
+  it("catches a block the stroke passed straight over", () => {
+    // The point of testing the segment: a fast drag reports its position every
+    // few frames and can step clean across a small block between two of them.
+    const before = p(20, mid.y);
+    const after = p(900, mid.y);
+    expect(strokeHitsArray(block, SPEC, before, after)).toBe(true);
+    // Neither endpoint is anywhere near it.
+    expect(strokeHitsArray(block, SPEC, before, before)).toBe(false);
+    expect(strokeHitsArray(block, SPEC, after, after)).toBe(false);
+  });
+
+  it("leaves alone a stroke that went past without touching", () => {
+    const above = height + 40;
+    expect(strokeHitsArray(block, SPEC, p(20, 100 - above), p(900, 100 - above))).toBe(false);
+    expect(strokeHitsArray(block, SPEC, p(20, 900), p(900, 900))).toBe(false);
+  });
+
+  it("clips a stroke that stops short of the block", () => {
+    expect(strokeHitsArray(block, SPEC, p(20, mid.y), p(80, mid.y))).toBe(false);
+    expect(strokeHitsArray(block, SPEC, p(20, mid.y), p(120, mid.y))).toBe(true);
+  });
+
+  it("rubs out a rotated block along its real edges, not its bounding box", () => {
+    const angled = { ...block, rotation: 45 };
+    const centre = toWorld(angled, SPEC, width / 2, height / 2);
+    expect(strokeHitsArray(angled, SPEC, centre, centre)).toBe(true);
+
+    // A corner of the upright box around a 45° block is empty roof.
+    const corner = arrayBounds(angled, SPEC);
+    const outside = p(corner.left + 1, corner.top + 1);
+    expect(strokeHitsArray(angled, SPEC, outside, outside)).toBe(false);
+  });
+
+  it("catches a diagonal sweep across a row of blocks", () => {
+    const row = [0, 1, 2].map((i) => ({
+      ...makeArray({ x: 100 + i * (width + 10), y: 100, cols: 3, rows: 2 }),
+      rotation: 0,
+    }));
+    const from = p(90, 100 - 5);
+    const to = p(100 + 3 * (width + 10), 100 + height + 5);
+    expect(row.every((a) => strokeHitsArray(a, SPEC, from, to))).toBe(true);
   });
 });
 

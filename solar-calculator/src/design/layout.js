@@ -280,6 +280,55 @@ const range = (n) => {
   return out;
 };
 
+/**
+ * Did a stroke from p0 to p1 touch this array?
+ *
+ * The eraser needs this rather than a plain "is the pointer inside it" test,
+ * because a pointer moving quickly reports its position every few frames and
+ * can step clean over a small block between two of them. Testing the SEGMENT
+ * between reports means a fast sweep rubs out everything under it, which is
+ * what an eraser is supposed to do.
+ *
+ * Both endpoints go into the array's own space first, so a rotated block is
+ * tested against an upright rectangle and the rotation costs nothing.
+ */
+export function strokeHitsArray(a, spec, p0, p1) {
+  const { width, height } = arraySize(a, spec);
+  const l0 = toLocal(a, spec, p0.x, p0.y);
+  const l1 = toLocal(a, spec, p1 ? p1.x : p0.x, p1 ? p1.y : p0.y);
+  return segmentHitsRect(l0, l1, width, height);
+}
+
+/** Liang–Barsky: does the segment cross the box from (0,0) to (w,h)? */
+function segmentHitsRect(p0, p1, w, h) {
+  const inside = (p) => p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= h;
+  if (inside(p0) || inside(p1)) return true;
+
+  const dx = p1.x - p0.x;
+  const dy = p1.y - p0.y;
+  let enter = 0;
+  let leave = 1;
+
+  // Each edge trims the run of the segment that can still be inside. If the
+  // window ever closes, the segment passed the box by.
+  const clip = (edge, distance) => {
+    if (edge === 0) return distance >= 0; // parallel: only survives if not outside
+    const t = distance / edge;
+    if (edge < 0) {
+      if (t > leave) return false;
+      if (t > enter) enter = t;
+    } else {
+      if (t < enter) return false;
+      if (t < leave) leave = t;
+    }
+    return true;
+  };
+
+  return (
+    clip(-dx, p0.x) && clip(dx, w - p0.x) && clip(-dy, p0.y) && clip(dy, h - p0.y)
+  );
+}
+
 /** The four corners of an array on the canvas, rotation included. */
 export function arrayCorners(a, spec) {
   const { width, height } = arraySize(a, spec);
