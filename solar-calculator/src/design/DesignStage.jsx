@@ -13,6 +13,7 @@ import {
   MousePointer2,
   Eraser,
   PanelsTopLeft,
+  CopyPlus,
 } from "lucide-react";
 
 import DesignCanvas from "./DesignCanvas";
@@ -44,10 +45,41 @@ import { kw } from "../lib/format";
  */
 
 const TOOLS = [
-  { value: "select", label: "Select", key: "V", icon: MousePointer2, hint: "Drag arrays, resize and rotate them." },
-  { value: "panel", label: "Panel", key: "P", icon: PanelsTopLeft, hint: "Tap the roof to drop a panel, or drag out a block." },
-  { value: "erase", label: "Erase", key: "E", icon: Eraser, hint: "Tap an array to remove it." },
-  { value: "measure", label: "Measure", key: "M", icon: Ruler, hint: "Drag a line across something you know the length of." },
+  {
+    value: "select",
+    label: "Select",
+    key: "V",
+    icon: MousePointer2,
+    hint: "Drag an array to move it, drag the photo to pan.",
+  },
+  {
+    value: "panel",
+    label: "Panel",
+    key: "P",
+    icon: PanelsTopLeft,
+    hint: "Tap the roof to drop a panel, or drag out a block.",
+  },
+  {
+    value: "build",
+    label: "Build",
+    key: "B",
+    icon: CopyPlus,
+    hint: "Drag off a block to repeat it across the roof.",
+  },
+  {
+    value: "erase",
+    label: "Erase",
+    key: "E",
+    icon: Eraser,
+    hint: "Tap an array to remove it.",
+  },
+  {
+    value: "measure",
+    label: "Measure",
+    key: "M",
+    icon: Ruler,
+    hint: "Drag a line across something you know the length of.",
+  },
 ];
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -85,7 +117,9 @@ export default function DesignStage({ q }) {
     setTool(next);
     setLine(null);
     setMetresText("");
-    if (next !== "select") setSelectedId(null);
+    // The build tool works ON the selection, so switching to it has to keep
+    // whatever is selected. Erase and measure aren't about a selection at all.
+    if (next === "erase" || next === "measure") setSelectedId(null);
   }, []);
 
   // Single-key tool switching, the way every drawing tool works.
@@ -132,6 +166,15 @@ export default function DesignStage({ q }) {
     setSelectedId(array.id);
     // Dropping a panel and then wanting to move it is the common next step.
     if (tool === "panel") setTool("select");
+  };
+
+  /** The build tool's output: several arrays in one go, so one Undo takes the
+   *  whole run back rather than the rep undoing block by block. */
+  const createMany = (made) => {
+    if (made.length === 0) return;
+    remember();
+    setArrays([...arrays, ...made.map((a) => keepOnCanvas(a, imageAspect, spec))]);
+    setSelectedId(made[made.length - 1].id);
   };
 
   const changeItem = (id, patch) => {
@@ -508,9 +551,11 @@ export default function DesignStage({ q }) {
             <p className="ml-auto text-[12px] text-slate-500">
               {measuring && line
                 ? "Now type how long that is, on the left."
-                : selected && tool === "select"
-                  ? `${selected.cols} × ${selected.rows} = ${selected.cols * selected.rows} panels at ${Math.round(selected.rotation)}° — side handle runs the row out`
-                  : activeTool?.hint}
+                : tool === "build" && selected
+                  ? `Drag off the ${selected.cols} × ${selected.rows} block — every step is another whole one`
+                  : selected && tool === "select"
+                    ? `${selected.cols} × ${selected.rows} = ${selected.cols * selected.rows} panels at ${Math.round(selected.rotation)}° — side handle runs the row out`
+                    : activeTool?.hint}
             </p>
           </div>
 
@@ -527,6 +572,7 @@ export default function DesignStage({ q }) {
             onSelect={setSelectedId}
             onChange={changeItem}
             onCreate={createArray}
+            onCreateMany={createMany}
             onDelete={deleteItem}
             tool={tool}
             onCalibrated={onCalibrated}
@@ -535,9 +581,10 @@ export default function DesignStage({ q }) {
 
           <p className="mt-3 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-slate-500">
             <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
-            Arrays snap to each other as you drag — hold Alt to place one exactly where you
-            want it instead. A visual layout for the proposal, not an engineering drawing:
-            no shading study, no string design. Its one real job is the panel count, which
+            Drag the photo to move around it, and pinch or use + and − to zoom. Arrays
+            snap to each other as you drag — hold Alt to place one exactly where you want
+            it instead. A visual layout for the proposal, not an engineering drawing: no
+            shading study, no string design. Its one real job is the panel count, which
             sets the system size on the quote.
           </p>
         </div>

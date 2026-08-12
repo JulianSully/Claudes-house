@@ -12,6 +12,8 @@ import {
   normaliseAngle,
   fitPanels,
   makeArray,
+  buildSteps,
+  buildCopies,
   DEFAULT_PANEL_WIDTH,
 } from "./layout";
 import { snapPosition, snapRotation } from "./snap";
@@ -24,18 +26,26 @@ import { snapPosition, snapRotation } from "./snap";
  * define before panels can go on, the way engineering-first tools work. Panels
  * go straight onto the photo.
  *
- *   PANEL tool: tap the roof ........ drops one panel there
- *               drag ................ lays a block of whole panels
  *   SELECT:     drag an array ....... moves it, snapping to what is already there
+ *               drag the photo ...... pans, so getting around while zoomed in is
+ *                                     the same drag it is on any map
  *               side handle ......... runs the row out along the roof
  *               bottom handle ....... stacks more rows down it
  *               corner .............. both at once
  *               top knob ............ rotates (Shift snaps to 15°)
+ *   PANEL tool: tap the roof ........ drops one panel there
+ *               drag ................ lays a block of whole panels
+ *   BUILD:      drag off an array ... repeats it across the roof, one whole
+ *                                     block at a time, along its own angle
  *   ERASE:      tap an array ........ removes it
  *   MEASURE:    drag a line ......... sets the scale of the photo
  *
+ * The select tool never CREATES anything, which is what lets a plain drag pan.
+ * Laying panels is the panel tool's job, and that is the one place a drag on
+ * open roof draws a block.
+ *
  *   pinch on a trackpad ... zoom about the cursor (+ and − also zoom)
- *   middle-drag, alt-drag or space-drag ... pan
+ *   space-drag, alt-drag or middle-drag ... pan from any tool, over anything
  *   arrows ... nudge, Shift for a bigger step
  *   Delete / Backspace ... remove      Escape ... deselect
  *
@@ -58,6 +68,7 @@ export default function DesignCanvas({
   onSelect,
   onChange, // (id, patch)
   onCreate, // (array)
+  onCreateMany, // (arrays) — the build tool lays several down at once
   onDelete,
   readOnly = false,
   tool = "select",
@@ -70,11 +81,13 @@ export default function DesignCanvas({
   const [draft, setDraft] = useState(null); // rectangle being dragged out
   const [ruler, setRuler] = useState(null); // measuring line
   const [guides, setGuides] = useState([]); // alignment lines, while snapping
+  const [build, setBuild] = useState(null); // repeats being dragged out
   const [hoverId, setHoverId] = useState(null); // what the eraser is over
   const [spaceHeld, setSpaceHeld] = useState(false);
 
   const measuring = tool === "measure";
   const erasing = tool === "erase";
+  const building = tool === "build";
 
   // One object describing how a panel is drawn, passed to every geometry call.
   const spec = useMemo(
@@ -95,6 +108,10 @@ export default function DesignCanvas({
   useEffect(() => {
     if (!measuring) setRuler(null);
   }, [measuring]);
+
+  useEffect(() => {
+    if (!building) setBuild(null);
+  }, [building]);
 
   const selected = arrays.find((a) => a.id === selectedId) ?? null;
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
@@ -135,6 +152,9 @@ export default function DesignCanvas({
       const p = pointerToViewBox(svgRef.current, e);
 
       if (g.type === "pan") {
+        // Anything past a few units is a drag rather than a tap, and a tap on
+        // open roof still means "deselect".
+        if (Math.hypot(p.x - g.start.x, p.y - g.start.y) > 3) g.moved = true;
         // The pointer should stay glued to the same spot on the photo, so the
         // view moves by the delta in world units, not screen pixels.
         setView((v) => ({
@@ -142,6 +162,11 @@ export default function DesignCanvas({
           x: g.startView.x - (p.x - g.start.x),
           y: g.startView.y - (p.y - g.start.y),
         }));
+        return;
+      }
+      if (g.type === "build") {
+        const local = toLocal(g.item, spec, p.x, p.y);
+        setBuild({ item: g.item, ...buildSteps(g.item, spec, local.x, local.y) });
         return;
       }
       if (g.type === "draw") {
@@ -203,6 +228,20 @@ export default function DesignCanvas({
       setGuides([]);
       if (!g) return;
 
+      if (g.type === "pan") {
+        if (!g.moved && g.deselectOnTap) onSelect(null);
+        forceRender((n) => n + 1);
+        return;
+      }
+      if (g.type === "build") {
+        const p = pointerToViewBox(svgRef.current, e);
+        const local = toLocal(g.item, spec, p.x, p.y);
+        const steps = buildSteps(g.item, spec, local.x, local.y);
+        setBuild(null);
+        const copies = buildCopies(g.item, spec, steps);
+        if (copies.length > 0) onCreateMany?.(copies);
+        return;
+      }
       if (g.type === "measure") {
         const p = pointerToViewBox(svgRef.current, e);
         const line = { x0: g.start.x, y0: g.start.y, x1: p.x, y1: p.y };
@@ -251,7 +290,7 @@ export default function DesignCanvas({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
     };
-  }, [onChange, onCreate, onSelect, onCalibrated, dropPanel, spec, readOnly]);
+  }, [onChange, onCreate, onCreateMany, onSelect, onCalibrated, dropPanel, spec, readOnly]);
 
   /* ---------------- keyboard ---------------- */
 
@@ -359,7 +398,14 @@ export default function DesignCanvas({
     }
     if (erasing) return; // nothing to erase out on the open roof
 
-    gesture.current = { type: "draw", start: p, dropOnTap: tool === "panel" };
+    // Dragging open roof with the panel tool lays a block. With every other
+    // tool it moves the photo, which is what a drag means on a map and what
+    // stops a rep papering the suburb in panels while trying to get around.
+    if (tool !== "panel") {
+      gesture.current = { type: "pan", start: p, startView: view, deselectOnTap: true };
+      return;
+    }
+    gesture.current = { type: "draw", start: p, dropOnTap: true };
     setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
   };
 
@@ -370,8 +416,15 @@ export default function DesignCanvas({
       onDelete(item.id);
       return;
     }
-    onSelect(item.id);
     const p = pointerToViewBox(svgRef.current, e);
+
+    if (building && item.kind === "array") {
+      onSelect(item.id);
+      gesture.current = { type: "build", id: item.id, item, start: p };
+      setBuild({ item, across: 0, down: 0 });
+      return;
+    }
+    onSelect(item.id);
     gesture.current = {
       type: "move",
       id: item.id,
@@ -401,13 +454,15 @@ export default function DesignCanvas({
     dropPanel(pointerToViewBox(svgRef.current, e));
   };
 
+  // The cursor over OPEN ROOF — arrays set their own, so this is the promise
+  // the empty canvas is making about what a drag will do there.
   const cursor = readOnly
     ? "default"
-    : spaceHeld
-      ? "grab"
-      : erasing
-        ? "not-allowed"
-        : "crosshair";
+    : erasing
+      ? "not-allowed"
+      : measuring || tool === "panel"
+        ? "crosshair"
+        : "grab";
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-slate-300 bg-ink-900">
@@ -486,6 +541,7 @@ export default function DesignCanvas({
         ))}
 
         {draft && <DraftRect draft={draft} spec={spec} scale={scale} />}
+        {build && <BuildPreview build={build} spec={spec} scale={scale} />}
         {ruler && <Ruler line={ruler} scale={scale} metresPerUnit={metresPerUnit} />}
 
         {selected && !readOnly && tool === "select" && (
@@ -685,6 +741,64 @@ function Handles({ array: a, spec, scale, onResize, onResizeX, onResizeY, onRota
         style={{ cursor: "nwse-resize" }}
         onPointerDown={onResize}
       />
+    </g>
+  );
+}
+
+/**
+ * Ghosts of the repeats while the build tool is being dragged, with a running
+ * panel count — so the rep is watching the number they actually care about
+ * rather than counting rectangles after the fact.
+ */
+function BuildPreview({ build, spec, scale }) {
+  const { item } = build;
+  const copies = buildCopies(item, spec, build);
+  if (copies.length === 0) return null;
+
+  const { width, height } = arraySize(item, spec);
+  const panels = (copies.length + 1) * item.cols * item.rows;
+  const last = copies[copies.length - 1];
+  const label = `${copies.length + 1} blocks · ${panels} panels`;
+  const w = label.length * 6.2 * scale + 12 * scale;
+
+  return (
+    <g pointerEvents="none">
+      {copies.map((c) => (
+        <g
+          key={c.id}
+          transform={`translate(${c.x} ${c.y}) rotate(${c.rotation} ${width / 2} ${height / 2})`}
+        >
+          <rect
+            x="0"
+            y="0"
+            width={width}
+            height={height}
+            fill="#3163F5"
+            fillOpacity="0.3"
+            stroke="#93C5FD"
+            strokeWidth={1.4 * scale}
+          />
+        </g>
+      ))}
+      <rect
+        x={last.x}
+        y={last.y - 20 * scale}
+        width={w}
+        height={16 * scale}
+        rx={3 * scale}
+        fill="#0B1220"
+        fillOpacity="0.9"
+      />
+      <text
+        x={last.x + w / 2}
+        y={last.y - 8 * scale}
+        textAnchor="middle"
+        fontSize={11 * scale}
+        fill="#fff"
+        fontFamily="ui-monospace, monospace"
+      >
+        {label}
+      </text>
     </g>
   );
 }

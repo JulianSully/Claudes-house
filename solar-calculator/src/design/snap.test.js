@@ -1,7 +1,16 @@
 import { describe, it, expect } from "vitest";
 
 import { snapPosition, snapRotation, SNAP_UNITS } from "./snap";
-import { makeArray, arrayBounds, arraySize, resizeFromCorner } from "./layout";
+import {
+  makeArray,
+  arrayBounds,
+  arraySize,
+  resizeFromCorner,
+  buildSteps,
+  buildCopies,
+  toLocal,
+  toWorld,
+} from "./layout";
 import {
   PANELS,
   CUSTOM_PANEL_ID,
@@ -177,6 +186,82 @@ describe("building an array out one axis at a time", () => {
         expect(after.top, `${axis} @ ${rotation}`).toBeLessThanOrEqual(before.top + 0.001);
       }
     }
+  });
+});
+
+describe("the build tool", () => {
+  const block = { ...makeArray({ x: 100, y: 100, cols: 4, rows: 1 }), rotation: 0 };
+  const { width, height, gap } = arraySize(block, SPEC);
+
+  it("counts a whole block per step, not a pixel per pixel", () => {
+    expect(buildSteps(block, SPEC, width / 2, height / 2)).toEqual({ across: 0, down: 0 });
+    expect(buildSteps(block, SPEC, width / 2 + (width + gap), height / 2).across).toBe(1);
+    expect(buildSteps(block, SPEC, width / 2 + 3 * (width + gap), height / 2).across).toBe(3);
+    expect(buildSteps(block, SPEC, width / 2, height / 2 + 2 * (height + gap)).down).toBe(2);
+  });
+
+  it("builds backwards too — roofs run left and up as well", () => {
+    expect(buildSteps(block, SPEC, width / 2 - 2 * (width + gap), height / 2).across).toBe(-2);
+    expect(buildSteps(block, SPEC, width / 2, height / 2 - (height + gap)).down).toBe(-1);
+  });
+
+  it("refuses to stamp out half the suburb on one wild drag", () => {
+    const wild = buildSteps(block, SPEC, 99999, 99999);
+    expect(wild.across).toBe(8);
+    expect(wild.down).toBe(8);
+    expect(buildCopies(block, SPEC, wild).length).toBeLessThanOrEqual(48);
+  });
+
+  it("leaves the block it copied where it is", () => {
+    const copies = buildCopies(block, SPEC, { across: 2, down: 0 });
+    expect(copies).toHaveLength(2);
+    expect(copies.map((c) => c.id)).not.toContain(block.id);
+    for (const c of copies) expect(c.id).not.toBe(block.id);
+  });
+
+  it("fills the rectangle when the drag goes diagonally", () => {
+    // 3 across by 2 down is a 4 x 3 grid of blocks, minus the original.
+    expect(buildCopies(block, SPEC, { across: 3, down: 2 })).toHaveLength(4 * 3 - 1);
+  });
+
+  it("spaces the repeats exactly one block and one margin apart", () => {
+    const [next] = buildCopies(block, SPEC, { across: 1, down: 0 });
+    expect(next.x - block.x).toBeCloseTo(width + gap, 9);
+    expect(next.y).toBeCloseTo(block.y, 9);
+    // Which is to say: butted up against it with the panel margin between.
+    expect(arrayBounds(next, SPEC).left).toBeCloseTo(
+      arrayBounds(block, SPEC).right + gap,
+      9
+    );
+  });
+
+  it("carries the copies down the roof line, not off across the ridge", () => {
+    // The whole reason the offset is rotated: a row set to a 37° roof has to
+    // repeat along that roof, not sideways across the screen.
+    const angled = { ...block, rotation: 37 };
+    const [next] = buildCopies(angled, SPEC, { across: 1, down: 0 });
+    const step = { x: next.x - angled.x, y: next.y - angled.y };
+    const along = (Math.atan2(step.y, step.x) * 180) / Math.PI;
+    expect(along).toBeCloseTo(37, 6);
+    expect(Math.hypot(step.x, step.y)).toBeCloseTo(width + gap, 9);
+  });
+
+  it("keeps every copy the same shape, angle and mounting as the original", () => {
+    const angled = { ...block, rotation: -22, orientation: "portrait" };
+    for (const c of buildCopies(angled, SPEC, { across: 2, down: 1 })) {
+      expect(c.cols).toBe(angled.cols);
+      expect(c.rows).toBe(angled.rows);
+      expect(c.rotation).toBe(angled.rotation);
+      expect(c.orientation).toBe("portrait");
+    }
+  });
+
+  it("reads a pointer anywhere on a rotated block as no step at all", () => {
+    const angled = { ...block, rotation: 48 };
+    const centre = toWorld(angled, SPEC, width / 2, height / 2);
+    const local = toLocal(angled, SPEC, centre.x, centre.y);
+    expect(buildSteps(angled, SPEC, local.x, local.y)).toEqual({ across: 0, down: 0 });
+    expect(buildCopies(angled, SPEC, { across: 0, down: 0 })).toEqual([]);
   });
 });
 

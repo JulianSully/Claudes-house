@@ -222,6 +222,64 @@ export function resizeFromCorner(a, spec, localX, localY, axis = "both") {
   return { ...next, x: anchor.x - width / 2 - d.x, y: anchor.y - height / 2 - d.y };
 }
 
+/**
+ * The build tool: repeat a block across the roof.
+ *
+ * Rather than placing every array by hand, you lay one row out properly and
+ * then drag across to stamp it again and again. The repeats step by one whole
+ * block plus the panel margin, and they step along the ARRAY'S OWN axes rather
+ * than the screen's — so a row set to a roof at 37° carries on down that roof,
+ * not off sideways across the ridge.
+ *
+ * `localX/localY` is the pointer in the source array's own space, which is what
+ * `toLocal` returns. Returns how many blocks across and down have been dragged;
+ * either can be negative, because roofs get built leftwards and upwards too.
+ */
+export function buildSteps(a, spec, localX, localY, limit = 8) {
+  const { width, height, gap } = arraySize(a, spec);
+  const clamp = (n) => Math.max(-limit, Math.min(limit, n));
+  return {
+    across: clamp(Math.round((localX - width / 2) / (width + gap))),
+    down: clamp(Math.round((localY - height / 2) / (height + gap))),
+  };
+}
+
+/**
+ * Where each repeat lands. The source block itself is never included — it is
+ * already on the roof — and the total is capped so one wild drag can't stamp
+ * out a hundred arrays that then have to be deleted one at a time.
+ */
+export function buildCopies(a, spec, { across, down }, max = 48) {
+  const { width, height, gap } = arraySize(a, spec);
+  const rad = (a.rotation * Math.PI) / 180;
+  const stepX = width + gap;
+  const stepY = height + gap;
+
+  const xs = range(across);
+  const ys = range(down);
+  const copies = [];
+
+  for (const j of ys) {
+    for (const i of xs) {
+      if (i === 0 && j === 0) continue;
+      if (copies.length >= max) return copies;
+      // Same size and angle as the source, so shifting the origin by the
+      // rotated offset shifts the drawn shape by exactly that much.
+      const d = rotatePoint(i * stepX, j * stepY, rad);
+      copies.push({ ...a, id: nextId("arr"), x: a.x + d.x, y: a.y + d.y });
+    }
+  }
+  return copies;
+}
+
+/** 0..n inclusive, counting the right way for a negative n. */
+const range = (n) => {
+  const out = [];
+  const step = n < 0 ? -1 : 1;
+  for (let i = 0; i !== n + step; i += step) out.push(i);
+  return out;
+};
+
 /** The four corners of an array on the canvas, rotation included. */
 export function arrayCorners(a, spec) {
   const { width, height } = arraySize(a, spec);
