@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Grid3x3,
   MessageSquarePlus,
@@ -10,9 +10,13 @@ import {
   Ruler,
   Check,
   X,
+  MousePointer2,
+  Eraser,
+  PanelsTopLeft,
 } from "lucide-react";
 
 import DesignCanvas from "./DesignCanvas";
+import PanelPicker from "./PanelPicker";
 import {
   makeNote,
   panelCount,
@@ -21,21 +25,33 @@ import {
   updateItem,
   removeItem,
   duplicateArray,
-  DEFAULT_PANEL_WIDTH,
 } from "./layout";
-import { PANELS, panelLabel, ORIENTATIONS } from "./panels";
+import { ORIENTATIONS } from "./panels";
 import { scaleFromCalibration, CALIBRATION_HINTS } from "./scale";
-import { Panel, InputRow, SelectRow, Segmented } from "../components/ui";
+import { Panel, InputRow, Segmented } from "../components/ui";
 import { kw } from "../lib/format";
 
 /**
  * The design screen.
  *
- * Almost everything happens on the canvas now — drag to draw, handles to size
- * and rotate, keys to nudge and delete. What is left here is what genuinely
- * belongs beside the roof rather than on it: the running kW, the panel spec,
- * and the site scale.
+ * The whole point is that laying out a roof is one continuous motion — pick a
+ * panel, drop it on the house, drag the row out, rotate it to the roof line.
+ * No plane to define first, no dialog between placing and seeing the kW.
+ *
+ * So the canvas gets everything that is about the roof, and this panel keeps
+ * only what is about the JOB: which module, how big the gap between them, what
+ * the photo is worth in metres, and what the layout adds up to.
  */
+
+const TOOLS = [
+  { value: "select", label: "Select", key: "V", icon: MousePointer2, hint: "Drag arrays, resize and rotate them." },
+  { value: "panel", label: "Panel", key: "P", icon: PanelsTopLeft, hint: "Tap the roof to drop a panel, or drag out a block." },
+  { value: "erase", label: "Erase", key: "E", icon: Eraser, hint: "Tap an array to remove it." },
+  { value: "measure", label: "Measure", key: "M", icon: Ruler, hint: "Drag a line across something you know the length of." },
+];
+
+const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
 export default function DesignStage({ q }) {
   const {
     siteImage, imageAspect,
@@ -43,11 +59,15 @@ export default function DesignStage({ q }) {
     notes, setNotes,
     panelWatts, setPanelWatts,
     panelWidth, setPanelWidth,
+    panelMarginMm, setPanelMarginMm, panelGap,
     siteScale, setSiteScale, clearSiteScale, scaledToLife,
     siteWidthMetres, panelLengthMetres,
     panelId, setPanelId, panelSpec, panelRatio,
+    isCustomPanel, customSize, setCustomSize,
     systemSizeKw,
   } = q;
+
+  const [tool, setTool] = useState("select");
 
   // New arrays take this orientation; changing it with one selected turns that
   // array too, which is what "portrait" means when you are looking at one.
@@ -56,30 +76,31 @@ export default function DesignStage({ q }) {
   const [selectedId, setSelectedId] = useState(null);
   const history = useRef([]);
 
-  // Setting the scale: drag a line across something of known length, type the
-  // metres. Two steps, and only ever needed for an uploaded photo — a fetched
-  // aerial arrives knowing its own scale.
-  const [calibrating, setCalibrating] = useState(false);
+  // Measuring the photo: drag a line, type the metres.
   const [line, setLine] = useState(null);
   const [metresText, setMetresText] = useState("");
+  const measuring = tool === "measure";
 
-  const startCalibrating = () => {
-    setSelectedId(null);
+  const chooseTool = useCallback((next) => {
+    setTool(next);
     setLine(null);
     setMetresText("");
-    setCalibrating(true);
-  };
-  const stopCalibrating = () => {
-    setCalibrating(false);
-    setLine(null);
-  };
-  const applyScale = (metres) => {
-    const next = scaleFromCalibration({ ...line, metres });
-    if (next === null) return;
-    setSiteScale(next);
-    stopCalibrating();
-  };
-  const onCalibrated = useCallback((drawn) => setLine(drawn), []);
+    if (next !== "select") setSelectedId(null);
+  }, []);
+
+  // Single-key tool switching, the way every drawing tool works.
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const match = TOOLS.find((t) => t.key.toLowerCase() === e.key.toLowerCase());
+      if (match) chooseTool(match.value);
+      if (e.key === "Escape") chooseTool("select");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chooseTool]);
 
   const remember = useCallback(() => {
     history.current = [...history.current.slice(-24), { arrays, notes }];
@@ -94,6 +115,8 @@ export default function DesignStage({ q }) {
   };
 
   const selected = arrays.find((a) => a.id === selectedId) ?? null;
+  const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
+  const spec = { panelWidth, ratio: panelRatio, gap: panelGap };
 
   const setOrientation = (value) => {
     setOrientationRaw(value);
@@ -102,21 +125,18 @@ export default function DesignStage({ q }) {
       setArrays(updateItem(arrays, selectedId, { orientation: value }));
     }
   };
-  const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
 
   const createArray = (array) => {
     remember();
-    setArrays([...arrays, keepOnCanvas(array, imageAspect, { panelWidth, ratio: panelRatio })]);
+    setArrays([...arrays, keepOnCanvas(array, imageAspect, spec)]);
     setSelectedId(array.id);
+    // Dropping a panel and then wanting to move it is the common next step.
+    if (tool === "panel") setTool("select");
   };
 
   const changeItem = (id, patch) => {
     if (arrays.some((a) => a.id === id)) {
-      setArrays(
-        updateItem(arrays, id, patch).map((a) =>
-          keepOnCanvas(a, imageAspect, { panelWidth, ratio: panelRatio })
-        )
-      );
+      setArrays(updateItem(arrays, id, patch).map((a) => keepOnCanvas(a, imageAspect, spec)));
     } else {
       setNotes(updateItem(notes, id, patch));
     }
@@ -143,9 +163,21 @@ export default function DesignStage({ q }) {
     const note = makeNote({ x: 380, y: 240, text: "New note" });
     setNotes([...notes, note]);
     setSelectedId(note.id);
+    setTool("select");
   };
 
+  const applyScale = (metres) => {
+    const next = scaleFromCalibration({ ...line, metres });
+    if (next === null) return;
+    setSiteScale(next);
+    setLine(null);
+    setMetresText("");
+    setTool("select");
+  };
+  const onCalibrated = useCallback((drawn) => setLine(drawn), []);
+
   const total = panelCount(arrays);
+  const activeTool = TOOLS.find((t) => t.value === tool);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -180,11 +212,14 @@ export default function DesignStage({ q }) {
                 : `Nothing placed yet, so the quote uses the ${kw(systemSizeKw)} on the Energy tab.`}
             </p>
           </div>
-          <SelectRow
-            label="Panel"
-            value={panelId}
-            onChange={setPanelId}
-            options={PANELS.map((p) => ({ value: p.id, label: panelLabel(p) }))}
+        </Panel>
+
+        <Panel title="Panel" icon={PanelsTopLeft}>
+          <PanelPicker
+            panelId={panelId}
+            onPick={setPanelId}
+            panelSpec={panelSpec}
+            panelWatts={panelWatts}
           />
           <InputRow
             label="Wattage"
@@ -194,22 +229,48 @@ export default function DesignStage({ q }) {
             onChange={setPanelWatts}
             step="5"
           />
+          {isCustomPanel && (
+            <>
+              <InputRow
+                label="Long side"
+                unit="mm"
+                value={customSize.longMm}
+                onChange={(v) => setCustomSize((s) => ({ ...s, longMm: Number(v) || 0 }))}
+                step="1"
+              />
+              <InputRow
+                label="Short side"
+                unit="mm"
+                value={customSize.shortMm}
+                onChange={(v) => setCustomSize((s) => ({ ...s, shortMm: Number(v) || 0 }))}
+                step="1"
+              />
+            </>
+          )}
           <Segmented
             label="Mounted"
-            value={orientation}
+            value={selected?.orientation ?? orientation}
             onChange={setOrientation}
             options={ORIENTATIONS}
+          />
+          <InputRow
+            label="Panel margin"
+            hint={scaledToLife ? "gap between modules" : "needs a scale to mean mm"}
+            unit="mm"
+            value={panelMarginMm}
+            onChange={setPanelMarginMm}
+            step="5"
           />
         </Panel>
 
         <Panel title="Scale" icon={Ruler}>
-          {calibrating ? (
+          {measuring ? (
             <Calibrator
               line={line}
               metresText={metresText}
               setMetresText={setMetresText}
               onApply={applyScale}
-              onCancel={stopCalibrating}
+              onCancel={() => chooseTool("select")}
             />
           ) : scaledToLife ? (
             <div className="rounded-lg bg-emerald-50 px-3 py-2.5">
@@ -222,9 +283,9 @@ export default function DesignStage({ q }) {
                 </span>
               </div>
               <p className="mt-1.5 text-[11.5px] leading-relaxed text-emerald-900/80">
-                A {panelSpec.brand === "Other" ? "panel" : panelSpec.model} is{" "}
-                {panelLengthMetres.toFixed(2)} m long, so that is exactly how long it is on
-                the roof. Change the panel and they resize themselves.
+                A {isCustomPanel ? "panel" : panelSpec.model} is {panelLengthMetres.toFixed(2)} m
+                long, so that is exactly how long it is on the roof. Change the panel and
+                they resize themselves.
               </p>
             </div>
           ) : (
@@ -251,11 +312,11 @@ export default function DesignStage({ q }) {
             </div>
           )}
 
-          {!calibrating && (
+          {!measuring && (
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={startCalibrating}
+                onClick={() => chooseTool("measure")}
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-300 py-2 text-[12.5px] font-medium text-slate-700 transition hover:bg-slate-50"
               >
                 <Ruler size={13} /> {scaledToLife ? "Redo the scale" : "Measure the photo"}
@@ -272,15 +333,88 @@ export default function DesignStage({ q }) {
               )}
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={addNote}
-            className="mt-1 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-slate-300 py-2 text-[12.5px] font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            <MessageSquarePlus size={13} /> Add a label
-          </button>
         </Panel>
+
+        {selected && (
+          <Panel
+            title={`Array — ${selected.cols} × ${selected.rows}`}
+            icon={Grid3x3}
+            action={
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={duplicate}
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-slate-500 transition hover:bg-slate-100"
+                >
+                  <Copy size={12} /> Copy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteItem(selected.id)}
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-red-600 transition hover:bg-red-50"
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+              </div>
+            }
+          >
+            <div className="flex items-baseline justify-between rounded-lg bg-slate-50 px-3 py-2">
+              <span className="text-[12.5px] text-slate-600">
+                {selected.cols * selected.rows} panels
+              </span>
+              <span className="font-mono text-[13px] font-semibold tabular-nums text-slate-900">
+                {kw((selected.cols * selected.rows * (Number(panelWatts) || 0)) / 1000)}
+              </span>
+            </div>
+
+            <InputRow
+              label="Rotation"
+              hint="to match the roof line"
+              unit="°"
+              value={Math.round(selected.rotation)}
+              onChange={(v) => changeItem(selected.id, { rotation: Number(v) || 0 })}
+              step="1"
+              min="-180"
+            />
+
+            <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+              <span className="text-[13px] leading-tight text-slate-600">
+                Roof faces
+                <span className="block text-[11px] text-slate-400">for the installer</span>
+              </span>
+              <select
+                value={selected.facing ?? ""}
+                onChange={(e) =>
+                  changeItem(selected.id, { facing: e.target.value || null })
+                }
+                className="h-9 w-[132px] rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-900 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
+              >
+                <option value="">Not set</option>
+                {COMPASS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <InputRow
+              label="Roof pitch"
+              hint="tilt, if you know it"
+              unit="°"
+              value={selected.tilt ?? ""}
+              onChange={(v) => changeItem(selected.id, { tilt: v === "" ? null : Number(v) })}
+              step="1"
+            />
+
+            <p className="flex items-start gap-1.5 pt-0.5 text-[11px] leading-relaxed text-slate-400">
+              <Info size={11} className="mt-0.5 shrink-0" />
+              Pitch and direction are recorded for whoever installs it. The savings
+              estimate runs on the flat sun-hours figure on the Energy tab, so changing
+              them here doesn't move the numbers.
+            </p>
+          </Panel>
+        )}
 
         {selectedNote && (
           <Panel
@@ -299,7 +433,9 @@ export default function DesignStage({ q }) {
             <input
               type="text"
               value={selectedNote.text}
-              onChange={(e) => setNotes(updateItem(notes, selectedNote.id, { text: e.target.value }))}
+              onChange={(e) =>
+                setNotes(updateItem(notes, selectedNote.id, { text: e.target.value }))
+              }
               placeholder="e.g. switchboard"
               className="h-9 w-full rounded-md border border-slate-300 px-2.5 text-[13px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
             />
@@ -313,7 +449,10 @@ export default function DesignStage({ q }) {
                 <li key={a.id}>
                   <button
                     type="button"
-                    onClick={() => setSelectedId(a.id)}
+                    onClick={() => {
+                      setTool("select");
+                      setSelectedId(a.id);
+                    }}
                     className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-[12.5px] transition ${
                       a.id === selectedId
                         ? "border-brand-500 bg-brand-50 text-brand-800"
@@ -334,48 +473,45 @@ export default function DesignStage({ q }) {
 
       <main className="min-w-0 flex-1 lg:overflow-y-auto">
         <div className="mx-auto max-w-[1100px] p-5 lg:p-6">
-          {/* Contextual bar — only what applies to what's selected. */}
+          {/* toolbar */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <p className="text-[12.5px] text-slate-600">
-              {calibrating ? (
-                <span className="font-medium text-amber-800">
-                  {line
-                    ? "Now type how long that is, on the left."
-                    : "Drag a line across something you know the length of — a garage door, a car, the street."}
-                </span>
-              ) : selected ? (
-                <>
-                  <strong className="font-semibold text-slate-800">
-                    {selected.cols} × {selected.rows} = {selected.cols * selected.rows} panels
-                  </strong>{" "}
-                  at {Math.round(selected.rotation)}° — drag the corner to resize, the top
-                  knob to rotate
-                </>
-              ) : (
-                <>
-                  Drag anywhere on the roof to lay panels. Pinch or use + and − to zoom,
-                  alt-drag to pan.
-                </>
-              )}
+            <div className="flex items-center gap-0.5 rounded-lg bg-slate-100 p-1">
+              {TOOLS.map(({ value, label, key, icon: Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => chooseTool(value)}
+                  aria-pressed={tool === value}
+                  title={`${label} (${key})`}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium transition ${
+                    tool === value
+                      ? "bg-white text-slate-900 shadow-card"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  <Icon size={13} /> {label}
+                  <span className="hidden font-mono text-[10px] text-slate-400 sm:inline">
+                    {key}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={addNote}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-[12px] font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              <MessageSquarePlus size={13} /> Label
+            </button>
+
+            <p className="ml-auto text-[12px] text-slate-500">
+              {measuring && line
+                ? "Now type how long that is, on the left."
+                : selected && tool === "select"
+                  ? `${selected.cols} × ${selected.rows} = ${selected.cols * selected.rows} panels at ${Math.round(selected.rotation)}° — side handle runs the row out`
+                  : activeTool?.hint}
             </p>
-            {selected && !calibrating && (
-              <div className="ml-auto flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={duplicate}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-[12px] font-medium text-slate-700 transition hover:bg-slate-50"
-                >
-                  <Copy size={12} /> Duplicate
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deleteItem(selected.id)}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-2.5 py-1.5 text-[12px] font-medium text-red-600 transition hover:bg-red-50"
-                >
-                  <Trash2 size={12} /> Delete
-                </button>
-              </div>
-            )}
           </div>
 
           <DesignCanvas
@@ -385,22 +521,24 @@ export default function DesignStage({ q }) {
             notes={notes}
             panelWidth={panelWidth}
             panelRatio={panelRatio}
+            panelGap={panelGap}
             orientation={orientation}
             selectedId={selectedId}
             onSelect={setSelectedId}
             onChange={changeItem}
             onCreate={createArray}
             onDelete={deleteItem}
-            calibrating={calibrating}
+            tool={tool}
             onCalibrated={onCalibrated}
             metresPerUnit={siteScale}
           />
 
           <p className="mt-3 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-slate-500">
             <Info size={12} className="mt-0.5 shrink-0 text-slate-400" />
-            A visual layout for the proposal, not an engineering drawing — no shading
-            study, no string design, no roof measurements. Its one real job is the panel
-            count, which sets the system size on the quote.
+            Arrays snap to each other as you drag — hold Alt to place one exactly where you
+            want it instead. A visual layout for the proposal, not an engineering drawing:
+            no shading study, no string design. Its one real job is the panel count, which
+            sets the system size on the quote.
           </p>
         </div>
       </main>

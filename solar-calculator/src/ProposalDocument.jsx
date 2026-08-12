@@ -110,6 +110,7 @@ export default function ProposalDocument({ proposal: p }) {
               notes={p.site.notes}
               panelWidth={p.site.panelWidth}
               panelRatio={p.site.panelRatio}
+              panelGap={p.site.panelGap}
               metresPerUnit={p.site.metresPerUnit ?? null}
               selectedId={null}
               onSelect={() => {}}

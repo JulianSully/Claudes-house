@@ -44,6 +44,7 @@ export function buildProposal(q, { now = new Date() } = {}) {
       notes: q.notes ?? [],
       panelWidth: numeric(q.panelWidth) || undefined,
       panelRatio: numeric(q.panelRatio) || undefined,
+      panelGap: numeric(q.panelGap) || undefined,
       // Metres per canvas unit, when the photo's scale is known. Carries the
       // scale bar onto the customer's copy — the plain evidence that the panels
       // drawn on their roof are the size the panels will be.

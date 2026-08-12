@@ -56,6 +56,11 @@ export function makeArray({ x, y, cols = 4, rows = 2, rotation = 0, orientation 
     rows: clampCount(rows),
     rotation,
     orientation,
+    // Which way the roof plane faces and how steep it is. Both are for whoever
+    // installs the system — the savings estimate runs on a flat sun-hours
+    // figure — so they start unset rather than assuming a north-facing roof.
+    facing: null,
+    tilt: null,
   };
 }
 
@@ -89,7 +94,9 @@ export function arraySize(a, spec = {}) {
   const portrait = (a.orientation ?? s.orientation ?? "landscape") === "portrait";
   const pw = portrait ? longSide * ratio : longSide;
   const ph = portrait ? longSide : longSide * ratio;
-  const gap = gapFor(longSide);
+  // An explicit gap comes from the panel margin the rep set in millimetres,
+  // which is only meaningful once the canvas knows its scale.
+  const gap = s.gap ?? gapFor(longSide);
 
   return {
     panelWidth: pw,
@@ -182,7 +189,7 @@ export function fitPanels(width, height, spec = {}) {
   const portrait = (s.orientation ?? "landscape") === "portrait";
   const pw = portrait ? longSide * ratio : longSide;
   const ph = portrait ? longSide : longSide * ratio;
-  const gap = gapFor(longSide);
+  const gap = s.gap ?? gapFor(longSide);
   return {
     cols: clampCount(Math.max(1, Math.round((Math.abs(width) + gap) / (pw + gap)))),
     rows: clampCount(Math.max(1, Math.round((Math.abs(height) + gap) / (ph + gap)))),
@@ -190,19 +197,59 @@ export function fitPanels(width, height, spec = {}) {
 }
 
 /**
- * Resize an array by dragging its far corner, keeping the NEAR corner pinned.
- * Without this the shape drifts under the cursor whenever it is rotated,
- * because the rotation pivot is the centre and the centre moves as it grows.
+ * Grow or shrink an array by dragging a handle, keeping the OPPOSITE corner
+ * pinned. Without this the shape drifts under the cursor whenever it is
+ * rotated, because the rotation pivot is the centre and the centre moves as the
+ * array grows.
+ *
+ * `axis` is what the handle is allowed to change: "x" for the side handle that
+ * runs a row out along the roof, "y" for the one that stacks rows down it,
+ * "both" for the corner. Constraining an edge handle to one axis is what makes
+ * dragging out a row feel like laying panels rather than fighting a rectangle.
  */
-export function resizeFromCorner(a, spec, localX, localY) {
+export function resizeFromCorner(a, spec, localX, localY, axis = "both") {
   const anchor = toWorld(a, spec, 0, 0);
-  const { cols, rows } = fitPanels(localX, localY, { ...spec, orientation: a.orientation });
-  const next = { ...a, cols, rows };
+  const fitted = fitPanels(localX, localY, { ...spec, orientation: a.orientation });
+  const next = {
+    ...a,
+    cols: axis === "y" ? a.cols : fitted.cols,
+    rows: axis === "x" ? a.rows : fitted.rows,
+  };
 
   const { width, height } = arraySize(next, spec);
   const rad = (next.rotation * Math.PI) / 180;
   const d = rotatePoint(-width / 2, -height / 2, rad);
   return { ...next, x: anchor.x - width / 2 - d.x, y: anchor.y - height / 2 - d.y };
+}
+
+/** The four corners of an array on the canvas, rotation included. */
+export function arrayCorners(a, spec) {
+  const { width, height } = arraySize(a, spec);
+  return [
+    toWorld(a, spec, 0, 0),
+    toWorld(a, spec, width, 0),
+    toWorld(a, spec, width, height),
+    toWorld(a, spec, 0, height),
+  ];
+}
+
+/**
+ * Upright box around an array, however it is rotated. Snapping and alignment
+ * guides work off this rather than the rotated shape: two arrays at different
+ * angles still line up along the screen, which is what a rep is looking at.
+ */
+export function arrayBounds(a, spec) {
+  const xs = [];
+  const ys = [];
+  for (const c of arrayCorners(a, spec)) {
+    xs.push(c.x);
+    ys.push(c.y);
+  }
+  const left = Math.min(...xs);
+  const right = Math.max(...xs);
+  const top = Math.min(...ys);
+  const bottom = Math.max(...ys);
+  return { left, right, top, bottom, cx: (left + right) / 2, cy: (top + bottom) / 2 };
 }
 
 /** Angle from an array's centre to a point, as a compass-style rotation. */

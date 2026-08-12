@@ -4,7 +4,6 @@ import {
   VIEWBOX_WIDTH,
   viewBoxHeight,
   arraySize,
-  keepOnCanvas,
   pointerToViewBox,
   toLocal,
   toWorld,
@@ -15,25 +14,36 @@ import {
   makeArray,
   DEFAULT_PANEL_WIDTH,
 } from "./layout";
+import { snapPosition, snapRotation } from "./snap";
 
 /**
  * The work surface.
  *
- * Direct manipulation throughout — the earlier version put every action in a
- * side panel, which meant looking away from the roof to change anything. Here:
+ * Direct manipulation throughout, with a small set of tools rather than a form
+ * beside the roof. The mechanic is deliberately flat: there is no roof plane to
+ * define before panels can go on, the way engineering-first tools work. Panels
+ * go straight onto the photo.
  *
- *   drag on empty canvas ....... draw a new array, filled with whole panels
- *   drag an array .............. move it
- *   drag the corner handle ..... add or remove panels
- *   drag the top handle ........ rotate (hold Shift to snap to 15°)
- *   pinch on a trackpad ........ zoom about the cursor (+ and − also zoom)
- *   middle-drag or space-drag .. pan
- *   arrows ..................... nudge, Shift for a bigger step
- *   Delete / Backspace ......... remove
- *   Escape ..................... deselect
+ *   PANEL tool: tap the roof ........ drops one panel there
+ *               drag ................ lays a block of whole panels
+ *   SELECT:     drag an array ....... moves it, snapping to what is already there
+ *               side handle ......... runs the row out along the roof
+ *               bottom handle ....... stacks more rows down it
+ *               corner .............. both at once
+ *               top knob ............ rotates (Shift snaps to 15°)
+ *   ERASE:      tap an array ........ removes it
+ *   MEASURE:    drag a line ......... sets the scale of the photo
  *
- * The image lives INSIDE the svg, so zoom and pan are one viewBox change
- * rather than two coordinate systems kept in step.
+ *   pinch on a trackpad ... zoom about the cursor (+ and − also zoom)
+ *   middle-drag, alt-drag or space-drag ... pan
+ *   arrows ... nudge, Shift for a bigger step
+ *   Delete / Backspace ... remove      Escape ... deselect
+ *
+ * A panel dragged off the palette lands here too, through the browser's own
+ * drag and drop.
+ *
+ * The image lives INSIDE the svg, so zoom and pan are one viewBox change rather
+ * than two coordinate systems kept in step.
  */
 export default function DesignCanvas({
   imageSrc,
@@ -42,6 +52,7 @@ export default function DesignCanvas({
   notes,
   panelWidth = DEFAULT_PANEL_WIDTH,
   panelRatio,
+  panelGap,
   orientation = "landscape",
   selectedId,
   onSelect,
@@ -49,23 +60,26 @@ export default function DesignCanvas({
   onCreate, // (array)
   onDelete,
   readOnly = false,
-  // Setting the scale: while `calibrating`, a drag draws a measuring line
-  // instead of an array, and its endpoints come back through `onCalibrated`.
-  calibrating = false,
-  onCalibrated,
+  tool = "select",
+  onCalibrated, // ({ x0, y0, x1, y1 }) while the measure tool is active
   metresPerUnit = null,
 }) {
   const svgRef = useRef(null);
   const gesture = useRef(null);
   const [, forceRender] = useState(0);
   const [draft, setDraft] = useState(null); // rectangle being dragged out
-  const [ruler, setRuler] = useState(null); // measuring line, while calibrating
+  const [ruler, setRuler] = useState(null); // measuring line
+  const [guides, setGuides] = useState([]); // alignment lines, while snapping
+  const [hoverId, setHoverId] = useState(null); // what the eraser is over
   const [spaceHeld, setSpaceHeld] = useState(false);
+
+  const measuring = tool === "measure";
+  const erasing = tool === "erase";
 
   // One object describing how a panel is drawn, passed to every geometry call.
   const spec = useMemo(
-    () => ({ panelWidth, ratio: panelRatio, orientation }),
-    [panelWidth, panelRatio, orientation]
+    () => ({ panelWidth, ratio: panelRatio, orientation, gap: panelGap }),
+    [panelWidth, panelRatio, orientation, panelGap]
   );
 
   const worldHeight = viewBoxHeight(aspect);
@@ -76,14 +90,39 @@ export default function DesignCanvas({
   const [view, setView] = useState(fullView);
   useEffect(() => setView(fullView), [fullView]);
 
-  // The line stays on screen while the rep types how long it is, and clears
-  // the moment they finish or back out.
+  // The measuring line stays on screen while the rep types how long it is, and
+  // clears the moment they finish or switch tools.
   useEffect(() => {
-    if (!calibrating) setRuler(null);
-  }, [calibrating]);
+    if (!measuring) setRuler(null);
+  }, [measuring]);
 
   const selected = arrays.find((a) => a.id === selectedId) ?? null;
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
+
+  // Snapping needs the live array list inside a listener that is bound once per
+  // gesture, so it reads through a ref rather than through the closure.
+  const latest = useRef({ arrays, spec, aspect });
+  latest.current = { arrays, spec, aspect };
+
+  /** One panel, centred where it was dropped rather than starting there. */
+  const dropPanel = useCallback(
+    (point) => {
+      const { panelWidth: pw, panelHeight: ph } = arraySize(
+        { cols: 1, rows: 1, orientation: spec.orientation },
+        spec
+      );
+      onCreate(
+        makeArray({
+          x: point.x - pw / 2,
+          y: point.y - ph / 2,
+          cols: 1,
+          rows: 1,
+          orientation: spec.orientation,
+        })
+      );
+    },
+    [onCreate, spec]
+  );
 
   /* ---------------- gestures ---------------- */
 
@@ -98,7 +137,11 @@ export default function DesignCanvas({
       if (g.type === "pan") {
         // The pointer should stay glued to the same spot on the photo, so the
         // view moves by the delta in world units, not screen pixels.
-        setView((v) => ({ ...v, x: g.startView.x - (p.x - g.start.x), y: g.startView.y - (p.y - g.start.y) }));
+        setView((v) => ({
+          ...v,
+          x: g.startView.x - (p.x - g.start.x),
+          y: g.startView.y - (p.y - g.start.y),
+        }));
         return;
       }
       if (g.type === "draw") {
@@ -110,30 +153,60 @@ export default function DesignCanvas({
         return;
       }
       if (g.type === "move") {
-        onChange(g.id, { x: p.x - g.dx, y: p.y - g.dy });
+        const { arrays: live, spec: liveSpec, aspect: liveAspect } = latest.current;
+        const item = live.find((a) => a.id === g.id);
+        const loose = { x: p.x - g.dx, y: p.y - g.dy };
+
+        // Notes are labels, not layout — nothing to align them to.
+        if (!item) {
+          onChange(g.id, loose);
+          return;
+        }
+        if (e.altKey) {
+          // Holding alt is the universal "let me put it exactly there".
+          setGuides([]);
+          onChange(g.id, loose);
+          return;
+        }
+        const result = snapPosition({
+          array: { ...item, ...loose },
+          spec: liveSpec,
+          others: live.filter((a) => a.id !== g.id),
+          aspect: liveAspect,
+          tolerance: 6 * g.zoom,
+          gap: liveSpec.gap ?? 0,
+        });
+        setGuides(result.guides);
+        onChange(g.id, { x: result.x, y: result.y });
         return;
       }
-      if (g.type === "resize") {
+      if (g.type === "resize" || g.type === "resize-x" || g.type === "resize-y") {
         const local = toLocal(g.item, spec, p.x, p.y);
-        onChange(g.id, resizeFromCorner(g.item, spec, local.x, local.y));
+        const axis = g.type === "resize-x" ? "x" : g.type === "resize-y" ? "y" : "both";
+        onChange(g.id, resizeFromCorner(g.item, spec, local.x, local.y, axis));
         return;
       }
       if (g.type === "rotate") {
         const raw = angleTo(g.item, spec, p.x, p.y);
-        const snapped = e.shiftKey ? Math.round(raw / 15) * 15 : Math.round(raw);
-        onChange(g.id, { rotation: normaliseAngle(snapped) });
+        if (e.shiftKey) {
+          onChange(g.id, { rotation: normaliseAngle(Math.round(raw / 15) * 15) });
+          return;
+        }
+        const others = latest.current.arrays.filter((a) => a.id !== g.id);
+        onChange(g.id, { rotation: snapRotation(normaliseAngle(Math.round(raw)), others) });
       }
     };
 
     const up = (e) => {
       const g = gesture.current;
       gesture.current = null;
+      setGuides([]);
       if (!g) return;
 
       if (g.type === "measure") {
         const p = pointerToViewBox(svgRef.current, e);
         const line = { x0: g.start.x, y0: g.start.y, x1: p.x, y1: p.y };
-        // A tap is not a measurement — leave the mode running so the rep can
+        // A tap is not a measurement — leave the tool running so the rep can
         // just try again rather than being bounced out of it.
         if (Math.hypot(p.x - g.start.x, p.y - g.start.y) < 3) {
           setRuler(null);
@@ -148,10 +221,12 @@ export default function DesignCanvas({
         const w = Math.abs(p.x - g.start.x);
         const h = Math.abs(p.y - g.start.y);
         setDraft(null);
-        // A tiny drag is a click: deselect rather than litter the roof with a
-        // one-panel array nobody meant to place.
+
+        // A tap drops a single panel with the panel tool, and means "nothing
+        // selected" with the select tool.
         if (w < 6 && h < 6) {
-          onSelect(null);
+          if (g.dropOnTap) dropPanel(g.start);
+          else onSelect(null);
           return;
         }
         const { cols, rows } = fitPanels(w, h, spec);
@@ -165,7 +240,6 @@ export default function DesignCanvas({
         onCreate(created);
         return;
       }
-      if (g.type === "pan" && g.movedLittle && g.deselectOnTap) onSelect(null);
       forceRender((n) => n + 1);
     };
 
@@ -177,7 +251,7 @@ export default function DesignCanvas({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
     };
-  }, [onChange, onCreate, onSelect, onCalibrated, spec, readOnly]);
+  }, [onChange, onCreate, onSelect, onCalibrated, dropPanel, spec, readOnly]);
 
   /* ---------------- keyboard ---------------- */
 
@@ -187,7 +261,7 @@ export default function DesignCanvas({
       if (e.code === "Space") setSpaceHeld(true);
       // Never steal a keystroke meant for a text field.
       const tag = document.activeElement?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
       if (e.key === "Escape") {
         onSelect(null);
@@ -201,7 +275,12 @@ export default function DesignCanvas({
         return;
       }
       const step = e.shiftKey ? 10 : 2;
-      const nudge = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      const nudge = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+      }[e.key];
       if (nudge) {
         e.preventDefault();
         const item = selected ?? selectedNote;
@@ -226,8 +305,7 @@ export default function DesignCanvas({
    * just how you scroll.
    *
    * Pinch still zooms: browsers deliver a trackpad pinch as a wheel event with
-   * ctrlKey set, which is the one case worth intercepting. Everything else goes
-   * to the + and − buttons.
+   * ctrlKey set, which is the one case worth intercepting.
    */
   const onWheel = useCallback(
     (e) => {
@@ -262,34 +340,45 @@ export default function DesignCanvas({
       return { x: v.x + (v.w - w) / 2, y: v.y + (v.h - h) / 2, w, h };
     });
 
+  const scale = view.w / VIEWBOX_WIDTH; // handles keep a constant on-screen size
+
   /* ---------------- pointer entry points ---------------- */
 
   const onCanvasPointerDown = (e) => {
     if (readOnly) return;
     const p = pointerToViewBox(svgRef.current, e);
 
-    if (calibrating) {
+    if (measuring) {
       gesture.current = { type: "measure", start: p };
       setRuler({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
       return;
     }
-
-    const panning = spaceHeld || e.button === 1 || e.altKey;
-
-    if (panning) {
-      gesture.current = { type: "pan", start: p, startView: view, movedLittle: false };
+    if (spaceHeld || e.button === 1 || e.altKey) {
+      gesture.current = { type: "pan", start: p, startView: view };
       return;
     }
-    gesture.current = { type: "draw", start: p };
+    if (erasing) return; // nothing to erase out on the open roof
+
+    gesture.current = { type: "draw", start: p, dropOnTap: tool === "panel" };
     setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
   };
 
   const startMove = (e, item) => {
     if (readOnly) return;
     e.stopPropagation();
+    if (erasing) {
+      onDelete(item.id);
+      return;
+    }
     onSelect(item.id);
     const p = pointerToViewBox(svgRef.current, e);
-    gesture.current = { type: "move", id: item.id, dx: p.x - item.x, dy: p.y - item.y };
+    gesture.current = {
+      type: "move",
+      id: item.id,
+      dx: p.x - item.x,
+      dy: p.y - item.y,
+      zoom: scale,
+    };
   };
 
   const startHandle = (e, type) => {
@@ -298,20 +387,44 @@ export default function DesignCanvas({
     gesture.current = { type, id: selected.id, item: selected };
   };
 
-  const scale = view.w / VIEWBOX_WIDTH; // handles keep a constant on-screen size
+  /* ---------------- dropping a panel off the palette ---------------- */
+
+  const onDragOver = (e) => {
+    if (readOnly) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const onDrop = (e) => {
+    if (readOnly) return;
+    e.preventDefault();
+    dropPanel(pointerToViewBox(svgRef.current, e));
+  };
+
+  const cursor = readOnly
+    ? "default"
+    : spaceHeld
+      ? "grab"
+      : erasing
+        ? "not-allowed"
+        : "crosshair";
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-slate-300 bg-ink-900">
       <svg
         ref={svgRef}
         viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+        role="application"
+        aria-label="Roof layout"
         className="block w-full"
         style={{
           aspectRatio: `${VIEWBOX_WIDTH} / ${worldHeight}`,
           touchAction: "none",
-          cursor: readOnly ? "default" : spaceHeld && !calibrating ? "grab" : "crosshair",
+          cursor,
         }}
         onPointerDown={onCanvasPointerDown}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
       >
         {imageSrc ? (
           <image
@@ -340,40 +453,49 @@ export default function DesignCanvas({
 
         {/* While measuring, the roof underneath has to be reachable — a drag
             that starts on a panel is still a measurement, not a move. */}
-        <g pointerEvents={calibrating ? "none" : "auto"}>
-        {arrays.map((a) => (
-          <PanelArray
-            key={a.id}
-            array={a}
-            spec={spec}
-            scale={scale}
-            selected={a.id === selectedId}
-            readOnly={readOnly}
-            onPointerDown={(e) => startMove(e, a)}
-          />
-        ))}
+        <g pointerEvents={measuring ? "none" : "auto"}>
+          {arrays.map((a) => (
+            <PanelArray
+              key={a.id}
+              array={a}
+              spec={spec}
+              scale={scale}
+              selected={a.id === selectedId}
+              doomed={erasing && a.id === hoverId}
+              readOnly={readOnly}
+              onPointerDown={(e) => startMove(e, a)}
+              onPointerEnter={() => erasing && setHoverId(a.id)}
+              onPointerLeave={() => setHoverId((id) => (id === a.id ? null : id))}
+            />
+          ))}
 
-        {notes.map((n) => (
-          <Note
-            key={n.id}
-            note={n}
-            scale={scale}
-            selected={n.id === selectedId}
-            readOnly={readOnly}
-            onPointerDown={(e) => startMove(e, n)}
-          />
-        ))}
+          {notes.map((n) => (
+            <Note
+              key={n.id}
+              note={n}
+              scale={scale}
+              selected={n.id === selectedId}
+              readOnly={readOnly}
+              onPointerDown={(e) => startMove(e, n)}
+            />
+          ))}
         </g>
+
+        {guides.map((g, i) => (
+          <Guide key={i} guide={g} scale={scale} />
+        ))}
 
         {draft && <DraftRect draft={draft} spec={spec} scale={scale} />}
         {ruler && <Ruler line={ruler} scale={scale} metresPerUnit={metresPerUnit} />}
 
-        {selected && !readOnly && !calibrating && (
+        {selected && !readOnly && tool === "select" && (
           <Handles
             array={selected}
             spec={spec}
             scale={scale}
             onResize={(e) => startHandle(e, "resize")}
+            onResizeX={(e) => startHandle(e, "resize-x")}
+            onResizeY={(e) => startHandle(e, "resize-y")}
             onRotate={(e) => startHandle(e, "rotate")}
           />
         )}
@@ -416,7 +538,17 @@ function ZoomButton({ children, label, onClick }) {
   );
 }
 
-function PanelArray({ array: a, spec, scale = 1, selected, readOnly, onPointerDown }) {
+function PanelArray({
+  array: a,
+  spec,
+  scale = 1,
+  selected,
+  doomed,
+  readOnly,
+  onPointerDown,
+  onPointerEnter,
+  onPointerLeave,
+}) {
   const { panelWidth: pw, panelHeight: ph, gap, width, height } = arraySize(a, spec);
 
   // Once panels draw at true size they can be a fifth of their old width, so
@@ -437,9 +569,9 @@ function PanelArray({ array: a, spec, scale = 1, selected, readOnly, onPointerDo
           width={pw}
           height={ph}
           rx={radius}
-          fill="#0F2744"
+          fill={doomed ? "#7F1D1D" : "#0F2744"}
           fillOpacity="0.9"
-          stroke="#7DD3FC"
+          stroke={doomed ? "#FCA5A5" : "#7DD3FC"}
           strokeWidth={line}
         />
       );
@@ -453,6 +585,8 @@ function PanelArray({ array: a, spec, scale = 1, selected, readOnly, onPointerDo
     <g
       transform={`translate(${a.x} ${a.y}) rotate(${a.rotation} ${width / 2} ${height / 2})`}
       onPointerDown={onPointerDown}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
       style={{ cursor: readOnly ? "default" : "move" }}
     >
       <rect
@@ -465,7 +599,7 @@ function PanelArray({ array: a, spec, scale = 1, selected, readOnly, onPointerDo
         fillOpacity="0.3"
       />
       {panels}
-      {selected && !readOnly && (
+      {(selected || doomed) && !readOnly && (
         <rect
           x={-halo}
           y={-halo}
@@ -473,7 +607,7 @@ function PanelArray({ array: a, spec, scale = 1, selected, readOnly, onPointerDo
           height={height + halo * 2}
           rx={halo}
           fill="none"
-          stroke="#3163F5"
+          stroke={doomed ? "#DC2626" : "#3163F5"}
           strokeWidth={halo}
         />
       )}
@@ -481,18 +615,52 @@ function PanelArray({ array: a, spec, scale = 1, selected, readOnly, onPointerDo
   );
 }
 
-/** Corner and rotate grips, sized in screen terms so they stay grabbable at any zoom. */
-function Handles({ array: a, spec, scale, onResize, onRotate }) {
+/**
+ * Grips for building the array out.
+ *
+ * Three of them rather than one corner: the side handle runs a row out along
+ * the roof, the bottom handle stacks rows down it, and the corner does both.
+ * Each is constrained to its own axis, so dragging a row out never accidentally
+ * adds a second row — which is the whole reason laying panels this way is
+ * faster than editing numbers.
+ */
+function Handles({ array: a, spec, scale, onResize, onResizeX, onResizeY, onRotate }) {
   const { width, height } = arraySize(a, spec);
   const r = 6 * scale;
   const corner = toWorld(a, spec, width, height);
+  const side = toWorld(a, spec, width, height / 2);
+  const foot = toWorld(a, spec, width / 2, height);
   const stem = 26 * scale;
   const knob = toWorld(a, spec, width / 2, -stem);
   const top = toWorld(a, spec, width / 2, 0);
 
+  // The edge grips are drawn as bars lying along the edge they belong to, so
+  // which way a handle will build is readable before it is dragged.
+  const grip = ({ point, cursor, onPointerDown, upright }) => (
+    <rect
+      x={point.x - (upright ? r * 0.55 : r)}
+      y={point.y - (upright ? r : r * 0.55)}
+      width={upright ? r * 1.1 : r * 2}
+      height={upright ? r * 2 : r * 1.1}
+      rx={1.5 * scale}
+      fill="#fff"
+      stroke="#3163F5"
+      strokeWidth={2 * scale}
+      style={{ cursor }}
+      onPointerDown={onPointerDown}
+    />
+  );
+
   return (
     <g>
-      <line x1={top.x} y1={top.y} x2={knob.x} y2={knob.y} stroke="#3163F5" strokeWidth={1.6 * scale} />
+      <line
+        x1={top.x}
+        y1={top.y}
+        x2={knob.x}
+        y2={knob.y}
+        stroke="#3163F5"
+        strokeWidth={1.6 * scale}
+      />
       <circle
         cx={knob.x}
         cy={knob.y}
@@ -503,6 +671,8 @@ function Handles({ array: a, spec, scale, onResize, onRotate }) {
         style={{ cursor: "grab" }}
         onPointerDown={onRotate}
       />
+      {grip({ point: side, cursor: "ew-resize", onPointerDown: onResizeX, upright: true })}
+      {grip({ point: foot, cursor: "ns-resize", onPointerDown: onResizeY, upright: false })}
       <rect
         x={corner.x - r}
         y={corner.y - r}
@@ -519,6 +689,25 @@ function Handles({ array: a, spec, scale, onResize, onRotate }) {
   );
 }
 
+/** An alignment line, shown so a snap reads as help rather than a glitch. */
+function Guide({ guide, scale }) {
+  const pad = 30 * scale;
+  const props =
+    guide.axis === "x"
+      ? { x1: guide.at, y1: guide.from - pad, x2: guide.at, y2: guide.to + pad }
+      : { x1: guide.from - pad, y1: guide.at, x2: guide.to + pad, y2: guide.at };
+
+  return (
+    <line
+      {...props}
+      stroke="#F472B6"
+      strokeWidth={1.2 * scale}
+      strokeDasharray={`${5 * scale} ${4 * scale}`}
+      pointerEvents="none"
+    />
+  );
+}
+
 /** Live preview while dragging out a new array, with the panel count on it. */
 function DraftRect({ draft, spec, scale }) {
   const x = Math.min(draft.x0, draft.x1);
@@ -530,8 +719,25 @@ function DraftRect({ draft, spec, scale }) {
 
   return (
     <g pointerEvents="none">
-      <rect x={x} y={y} width={w} height={h} fill="#3163F5" fillOpacity="0.18" stroke="#3163F5" strokeWidth={1.6 * scale} />
-      <rect x={x} y={y - 20 * scale} width={64 * scale} height={16 * scale} rx={3 * scale} fill="#0B1220" fillOpacity="0.9" />
+      <rect
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        fill="#3163F5"
+        fillOpacity="0.18"
+        stroke="#3163F5"
+        strokeWidth={1.6 * scale}
+      />
+      <rect
+        x={x}
+        y={y - 20 * scale}
+        width={64 * scale}
+        height={16 * scale}
+        rx={3 * scale}
+        fill="#0B1220"
+        fillOpacity="0.9"
+      />
       <text
         x={x + 32 * scale}
         y={y - 8 * scale}
@@ -572,7 +778,15 @@ function Ruler({ line, scale, metresPerUnit }) {
         [line.x0, line.y0],
         [line.x1, line.y1],
       ].map(([cx, cy], i) => (
-        <circle key={i} cx={cx} cy={cy} r={3.5 * scale} fill="#FBBF24" stroke="#0B1220" strokeWidth={scale} />
+        <circle
+          key={i}
+          cx={cx}
+          cy={cy}
+          r={3.5 * scale}
+          fill="#FBBF24"
+          stroke="#0B1220"
+          strokeWidth={scale}
+        />
       ))}
       <rect
         x={mid.x - w / 2}
@@ -667,7 +881,15 @@ function Note({ note, scale, selected, readOnly, onPointerDown }) {
       >
         {text}
       </text>
-      <line x1={w / 2} y1={hh} x2={w / 2} y2={hh + 10 * scale} stroke="#FFFFFF" strokeOpacity="0.6" strokeWidth={1.5 * scale} />
+      <line
+        x1={w / 2}
+        y1={hh}
+        x2={w / 2}
+        y2={hh + 10 * scale}
+        stroke="#FFFFFF"
+        strokeOpacity="0.6"
+        strokeWidth={1.5 * scale}
+      />
       <circle cx={w / 2} cy={hh + 12 * scale} r={2.5 * scale} fill="#FFFFFF" fillOpacity="0.9" />
     </g>
   );

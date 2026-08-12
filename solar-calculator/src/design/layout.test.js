@@ -237,7 +237,7 @@ describe("canvas geometry", () => {
  * Panel brands change the wattage AND the shape drawn on the roof.
  * ------------------------------------------------------------------ */
 describe("panel brands and mounting", () => {
-  const trina = panelById("trina-vertex-s-440");
+  const trina = panelById("trina-vertex-s-plus-440");
   const qcells = panelById("qcells-ml-g11-410");
 
   it("every catalogue entry has what the app needs", () => {

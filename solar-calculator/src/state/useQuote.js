@@ -8,7 +8,12 @@ import {
   DEFAULT_PANEL_WIDTH,
   DEFAULT_ASPECT,
 } from "../design/layout";
-import { panelById, panelRatio, DEFAULT_PANEL_ID } from "../design/panels";
+import {
+  panelById,
+  panelRatio,
+  DEFAULT_PANEL_ID,
+  CUSTOM_PANEL_ID,
+} from "../design/panels";
 import { panelUnitsFor, groundWidthMetres } from "../design/scale";
 import {
   DEFAULT_CUSTOMER,
@@ -53,7 +58,12 @@ export function useQuote() {
   // Choosing a panel sets the wattage and the proportions it is drawn at.
   // Wattage stays editable: the same model ships at several outputs.
   const [panelId, setPanelIdRaw] = useState(DEFAULT_PANEL_ID);
-  const panelSpec = panelById(panelId);
+  // A panel that isn't in the catalogue still has a real size, and with panels
+  // drawn to scale that size matters — so a custom entry carries its own.
+  const [customSize, setCustomSize] = useState({ longMm: 1762, shortMm: 1134 });
+  const isCustomPanel = panelId === CUSTOM_PANEL_ID;
+  const catalogued = panelById(panelId);
+  const panelSpec = isCustomPanel ? { ...catalogued, ...customSize } : catalogued;
   const [panelWatts, setPanelWatts] = useState(panelSpec.watts);
   const setPanelId = (id) => {
     setPanelIdRaw(id);
@@ -91,6 +101,21 @@ export function useQuote() {
     setSiteScale(null);
     setManualPanelWidth(w);
   };
+
+  /* ---- the gap between panels ----
+   *
+   * Installers leave a consistent margin between modules — for the rail
+   * hardware, for expansion, and because some products specify one. Setting it
+   * once in millimetres and having every panel laid afterwards carry it is the
+   * difference between a layout that is right and a layout that was measured
+   * panel by panel.
+   *
+   * It can only mean anything in millimetres once the canvas knows its scale;
+   * without one the drawing falls back to a seam proportional to the panel.
+   */
+  const [panelMarginMm, setPanelMarginMm] = useState(20);
+  const panelGap =
+    siteScale > 0 && panelMarginMm >= 0 ? panelMarginMm / 1000 / siteScale : undefined;
 
   // Tariff
   const [supplyCharge, setSupplyCharge] = useState(1.1); // $/day
@@ -207,7 +232,9 @@ export function useQuote() {
     siteScale, setSiteScale, clearSiteScale, scaledToLife,
     siteWidthMetres: groundWidthMetres(siteScale),
     panelLengthMetres: panelSpec.longMm / 1000,
+    panelMarginMm, setPanelMarginMm, panelGap,
     panelId, setPanelId, panelSpec,
+    isCustomPanel, customSize, setCustomSize,
     panelRatio: panelRatio(panelSpec),
     placedPanels, sizeFromLayout,
     // system
