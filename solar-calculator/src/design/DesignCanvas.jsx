@@ -69,6 +69,7 @@ export default function DesignCanvas({
   onCreateMany, // (arrays) — the build tool lays several down at once
   onDelete,
   onDeleteMany, // (ids) — one sweep of the eraser
+  onGestureStart, // fired once as a drag begins, so undo has one snapshot
   readOnly = false,
   tool = "select",
   onCalibrated, // ({ x0, y0, x1, y1 }) while the measure tool is active
@@ -351,7 +352,10 @@ export default function DesignCanvas({
       if (nudge) {
         e.preventDefault();
         const item = selected ?? selectedNote;
-        if (item) onChange(selectedId, { x: item.x + nudge[0], y: item.y + nudge[1] });
+        if (item) {
+          onGestureStart?.();
+          onChange(selectedId, { x: item.x + nudge[0], y: item.y + nudge[1] });
+        }
       }
     };
     const up = (e) => e.code === "Space" && setSpaceHeld(false);
@@ -361,7 +365,7 @@ export default function DesignCanvas({
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [onChange, onDelete, onSelect, readOnly, selected, selectedId, selectedNote]);
+  }, [onChange, onDelete, onGestureStart, onSelect, readOnly, selected, selectedId, selectedNote]);
 
   /* ---------------- zoom ---------------- */
 
@@ -465,6 +469,7 @@ export default function DesignCanvas({
       return;
     }
     onSelect(item.id);
+    onGestureStart?.();
     gesture.current = {
       type: "move",
       id: item.id,
@@ -477,6 +482,7 @@ export default function DesignCanvas({
   const startHandle = (e, type) => {
     if (readOnly || !selected) return;
     e.stopPropagation();
+    onGestureStart?.();
     gesture.current = { type, id: selected.id, item: selected };
   };
 

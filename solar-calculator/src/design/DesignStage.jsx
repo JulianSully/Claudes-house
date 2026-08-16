@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Grid3x3,
   MessageSquarePlus,
   Trash2,
   Undo2,
+  Redo2,
   Sun,
   Info,
   Ruler,
@@ -26,6 +27,15 @@ import {
   removeItem,
 } from "./layout";
 import { ORIENTATIONS } from "./panels";
+import {
+  emptyHistory,
+  remember as rememberIn,
+  undo as undoStep,
+  redo as redoStep,
+  canUndo,
+  canRedo,
+  historyShortcut,
+} from "./history";
 import { scaleFromCalibration, CALIBRATION_HINTS } from "./scale";
 import { Panel, InputRow, Segmented } from "../components/ui";
 import { kw } from "../lib/format";
@@ -98,7 +108,7 @@ export default function DesignStage({ q }) {
   const [orientation, setOrientationRaw] = useState("landscape");
 
   const [selectedId, setSelectedId] = useState(null);
-  const history = useRef([]);
+  const [history, setHistory] = useState(emptyHistory);
 
   // Measuring the photo: drag a line, type the metres.
   const [line, setLine] = useState(null);
@@ -128,17 +138,49 @@ export default function DesignStage({ q }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [chooseTool]);
 
+  /* ---- undo and redo ----
+   *
+   * Every mutation calls remember() FIRST, with the layout as it stands, so a
+   * step back restores what was on the roof a moment ago. Drags snapshot once
+   * when the gesture starts rather than on every pointer move — otherwise
+   * dragging one panel across the roof would fill the stack with a hundred
+   * near-identical layouts and Ctrl+Z would crawl backwards a pixel at a time.
+   */
   const remember = useCallback(() => {
-    history.current = [...history.current.slice(-24), { arrays, notes }];
+    setHistory((h) => rememberIn(h, { arrays, notes }));
   }, [arrays, notes]);
 
-  const undo = () => {
-    const previous = history.current.pop();
-    if (!previous) return;
-    setArrays(previous.arrays);
-    setNotes(previous.notes);
+  const applyStep = (step) => {
+    if (!step) return;
+    setArrays(step.state.arrays);
+    setNotes(step.state.notes);
+    setHistory(step.history);
+    // Whatever was selected may not exist any more, and pointing at nothing is
+    // better than pointing at something that has moved out from under it.
     setSelectedId(null);
   };
+
+  const undo = () => applyStep(undoStep(history, { arrays, notes }));
+  const redo = () => applyStep(redoStep(history, { arrays, notes }));
+
+  // Ctrl+Z / Ctrl+Y, and the Mac pair as well. Bound here rather than on the
+  // canvas so it works wherever the rep's focus happens to be on this screen —
+  // except inside a text field, where Ctrl+Z belongs to what they are typing.
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const action = historyShortcut(e);
+      if (!action) return;
+      e.preventDefault();
+      if (action === "undo") undo();
+      else redo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // No dependency list on purpose: undo and redo close over this render's
+    // layout and history, so the handler has to be the current one.
+  });
 
   const selected = arrays.find((a) => a.id === selectedId) ?? null;
   const selectedPanels = selected ? selected.cols * selected.rows : 0;
@@ -221,15 +263,22 @@ export default function DesignStage({ q }) {
           title="System from this layout"
           icon={Sun}
           action={
-            history.current.length > 0 && (
-              <button
-                type="button"
+            <div className="flex items-center gap-0.5">
+              <HistoryButton
+                icon={Undo2}
+                label="Undo"
+                shortcut="Ctrl+Z"
+                disabled={!canUndo(history)}
                 onClick={undo}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-slate-500 transition hover:bg-slate-100"
-              >
-                <Undo2 size={12} /> Undo
-              </button>
-            )
+              />
+              <HistoryButton
+                icon={Redo2}
+                label="Redo"
+                shortcut="Ctrl+Y"
+                disabled={!canRedo(history)}
+                onClick={redo}
+              />
+            </div>
           }
         >
           <div className="rounded-lg bg-slate-50 px-3 py-3">
@@ -570,6 +619,7 @@ export default function DesignStage({ q }) {
             onCreateMany={createMany}
             onDelete={deleteItem}
             onDeleteMany={deleteMany}
+            onGestureStart={remember}
             tool={tool}
             onCalibrated={onCalibrated}
             metresPerUnit={siteScale}
@@ -586,6 +636,22 @@ export default function DesignStage({ q }) {
         </div>
       </main>
     </div>
+  );
+}
+
+/** Undo or redo, greyed out rather than hidden so the pair stays where it is. */
+function HistoryButton({ icon: Icon, label, shortcut, disabled, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={`${label} (${shortcut})`}
+      aria-label={label}
+      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-slate-500 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300"
+    >
+      <Icon size={12} /> {label}
+    </button>
   );
 }
 
